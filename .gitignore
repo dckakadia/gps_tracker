@@ -1,0 +1,22 @@
+# Node
+server/node_modules
+server/.env
+
+# Android
+android-app/.gradle
+android-app/.idea
+android-app/local.properties
+android-app/.externalNativeBuild
+android-app/app/build
+android-app/gradle-*
+android-app/*.zip
+
+# Flutter
+admin-dashboard/.dart_tool
+admin-dashboard/.flutter-plugins
+admin-dashboard/.packages
+admin-dashboard/build
+
+# OS
+.DS_Store
+Thumbs.db

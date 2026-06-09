@@ -1,0 +1,27 @@
+[Unit]
+Description=GPS Tracker Node.js Backend
+After=network.target postgresql.service
+Requires=postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/dckakadia/gps_tracker/server
+EnvironmentFile=/home/dckakadia/gps_tracker/server/.env
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node /home/dckakadia/gps_tracker/server/app.js
+Restart=on-failure
+RestartSec=5s
+StartLimitBurst=5
+KillSignal=SIGINT
+TimeoutStopSec=20s
+User=dckakadia
+Group=dckakadia
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
