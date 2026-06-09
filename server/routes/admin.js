@@ -19,7 +19,7 @@ router.get('/users', async (req, res) => {
 
 router.post('/users', async (req, res) => {
   try {
-    const { name, email, password } = req.body;
+    const { name, email, password, role } = req.body;
     if (!name || !email || !password) {
       return res.status(400).json({ error: 'Name, email, and password are required' });
     }
@@ -29,15 +29,16 @@ router.post('/users', async (req, res) => {
       return res.status(409).json({ error: 'Email already registered' });
     }
 
+    const userRole = role || 'salesperson';
     const passwordHash = await bcrypt.hash(password, 12);
     const result = await query(
       'INSERT INTO users (name, email, password_hash, role, created_at, updated_at) VALUES ($1, $2, $3, $4, NOW(), NOW()) RETURNING id, name, email, role, created_at, updated_at',
-      [name, email, passwordHash, 'salesperson'],
+      [name, email, passwordHash, userRole],
     );
 
     return res.status(201).json({ user: result.rows[0] });
   } catch (err) {
-    console.error('Create salesperson error', err);
+    console.error('Create user error', err);
     return res.status(500).json({ error: 'Unable to create user' });
   }
 });

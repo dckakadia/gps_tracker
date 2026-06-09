@@ -10,7 +10,7 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final _emailController = TextEditingController();
+  final _identifierController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _loading = false;
   String? _error;
@@ -22,7 +22,7 @@ class _LoginScreenState extends State<LoginScreen> {
     });
 
     try {
-      final response = await ApiService.login(_emailController.text.trim(), _passwordController.text.trim());
+      final response = await ApiService.login(_identifierController.text.trim(), _passwordController.text.trim());
       if (response.containsKey('token')) {
         Navigator.of(context).pushReplacement(MaterialPageRoute(
           builder: (_) => DashboardScreen(token: response['token']),
@@ -61,8 +61,8 @@ class _LoginScreenState extends State<LoginScreen> {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             TextField(
-              controller: _emailController,
-              decoration: InputDecoration(labelText: 'Email'),
+              controller: _identifierController,
+              decoration: InputDecoration(labelText: 'Email or User ID'),
             ),
             SizedBox(height: 16),
             TextField(

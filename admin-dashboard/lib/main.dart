@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'screens/login_screen.dart';
+import 'screens/dashboard_screen.dart';
 
 void main() {
   runApp(AdminDashboardApp());
@@ -12,6 +13,9 @@ class AdminDashboardApp extends StatelessWidget {
       title: 'Admin Dashboard',
       theme: ThemeData(primarySwatch: Colors.blue),
       home: LoginScreen(),
+      routes: {
+        '/login': (context) => LoginScreen(),
+      },
     );
   }
 }

@@ -40,6 +40,16 @@ This repository contains a self-hosted location tracking system with three compo
 7. Start backend:
    - `npm start`
 
+## Run all services together
+From the repo root, use one of the following:
+
+- PowerShell:
+  - `.\start-all.ps1`
+- Command Prompt:
+  - `.\start-all.bat`
+
+This will open one terminal for the backend and another terminal for the Flutter admin dashboard.
+
 ## Android App Setup
 
 1. Open `android-app` in Android Studio.
@@ -55,9 +65,31 @@ This repository contains a self-hosted location tracking system with three compo
 4. Update `ApiService.baseUrl` to the backend API host.
 5. Run web: `flutter run -d chrome` or Android: `flutter run`.
 
+## Backup Configuration
+
+The system includes automatic and manual backups to Google Drive using rclone.
+
+### Quick Setup
+1. Follow the **complete guide**: [RCLONE_SETUP.md](./RCLONE_SETUP.md)
+2. Set in `server/.env`:
+   ```
+   ENABLE_AUTO_BACKUP=true
+   RCLONE_CONFIG=/home/dckakadia/.config/rclone/rclone.conf
+   ```
+3. Backups run **automatically every day at 2:00 AM UTC**
+4. Manual backups available in **Admin Dashboard > Backup tab**
+
+### Key Features
+- ✅ Real-time progress tracking (percentage, file count, speed, ETA)
+- ✅ Backs up database, uploads, and metadata to Google Drive
+- ✅ Fire-and-forget API (no 504 timeouts)
+- ✅ Automatic cleanup of old local backups (>30 days)
+- ✅ Cron job scheduling for daily auto-backup
+
 ## Core Behavior
 
 - Android app uses Fused Location Provider with balanced power accuracy and significant movement thresholds.
 - Offline mode caches points in Room and syncs automatically via WorkManager when connectivity returns.
 - Backend stores users and location points in PostgreSQL; admin can manage users and fetch latest locations.
 - Admin dashboard polls live locations and displays them on a map.
+- Automatic daily backups to Google Drive at 2:00 AM UTC; manual backups on-demand from admin panel.

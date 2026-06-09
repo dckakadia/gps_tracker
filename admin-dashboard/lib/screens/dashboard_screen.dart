@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'map_screen.dart';
 import 'users_screen.dart';
+import 'backup_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   final String token;
@@ -18,6 +19,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final screens = [
       UsersScreen(token: widget.token),
       MapScreen(token: widget.token),
+      BackupScreen(token: widget.token),
     ];
 
     return LayoutBuilder(
@@ -25,7 +27,42 @@ class _DashboardScreenState extends State<DashboardScreen> {
         final isWide = constraints.maxWidth >= 700;
 
         return Scaffold(
-          appBar: AppBar(title: Text('Admin Dashboard')),
+          appBar: AppBar(
+            title: Text('Admin Dashboard'),
+            actions: [
+              IconButton(
+                icon: Icon(Icons.logout),
+                tooltip: 'Logout',
+                onPressed: () {
+                  showDialog(
+                    context: context,
+                    builder: (BuildContext context) {
+                      return AlertDialog(
+                        title: Text('Logout'),
+                        content: Text('Are you sure you want to logout?'),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.of(context).pop(),
+                            child: Text('Cancel'),
+                          ),
+                          TextButton(
+                            onPressed: () {
+                              Navigator.of(context).pop();
+                              Navigator.of(context).pushNamedAndRemoveUntil(
+                                '/login',
+                                (route) => false,
+                              );
+                            },
+                            child: Text('Logout', style: TextStyle(color: Colors.red)),
+                          ),
+                        ],
+                      );
+                    },
+                  );
+                },
+              ),
+            ],
+          ),
           body: SafeArea(
             child: isWide
                 ? Row(
@@ -47,6 +84,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             icon: Icon(Icons.map),
                             label: Text('Live Map'),
                           ),
+                          NavigationRailDestination(
+                            icon: Icon(Icons.backup),
+                            label: Text('Backup'),
+                          ),
                         ],
                       ),
                       Expanded(child: screens[_selectedIndex]),
@@ -66,6 +107,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   items: [
                     BottomNavigationBarItem(icon: Icon(Icons.people), label: 'Users'),
                     BottomNavigationBarItem(icon: Icon(Icons.map), label: 'Live Map'),
+                    BottomNavigationBarItem(icon: Icon(Icons.backup), label: 'Backup'),
                   ],
                 ),
         );

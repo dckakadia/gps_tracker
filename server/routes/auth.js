@@ -11,12 +11,16 @@ const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '8h';
 
 router.post('/login', async (req, res) => {
   try {
-    const { email, password } = req.body;
-    if (!email || !password) {
-      return res.status(400).json({ error: 'Email and password are required' });
+    const { identifier, password } = req.body;
+    const loginIdentifier = identifier?.toString().trim();
+    if (!loginIdentifier || !password) {
+      return res.status(400).json({ error: 'Email/User ID and password are required' });
     }
 
-    const result = await query('SELECT id, name, email, password_hash, role FROM users WHERE email = $1', [email]);
+    const result = await query(
+      'SELECT id, name, email, password_hash, role FROM users WHERE email = $1 OR name = $1 OR LOWER(name) = LOWER($1) OR id::text = $1',
+      [loginIdentifier]
+    );
     const user = result.rows[0];
     if (!user) {
       return res.status(401).json({ error: 'Invalid credentials' });
@@ -33,8 +37,8 @@ router.post('/login', async (req, res) => {
 
     return res.json({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role } });
   } catch (err) {
-    console.error('Login error', err);
-    return res.status(500).json({ error: 'Server error during login' });
+    console.error('Login error:', err.message, err.stack);
+    return res.status(500).json({ error: 'Server error during login', details: err.message });
   }
 });
 

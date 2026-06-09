@@ -1,0 +1,237 @@
+import { spawn } from 'child_process';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import util from 'util';
+import { exec } from 'child_process';
+
+const execPromise = util.promisify(exec);
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+
+const BACKUPS_DIR = path.join(__dirname, '..', 'backups');
+const RCLONE_CONFIG = process.env.RCLONE_CONFIG || '/home/dckakadia/.config/rclone/rclone.conf';
+
+// Ensure local backups directory exists
+if (!fs.existsSync(BACKUPS_DIR)) {
+  fs.mkdirSync(BACKUPS_DIR, { recursive: true });
+}
+
+// ── Parse a single rclone stats line ─────────────────────────────────────────
+function parseRcloneStats(line) {
+  const result = {};
+
+  const transferMatch = line.match(
+    /Transferred:\s+([\d.]+)\s*(\w+)\s*\/\s*([\d.]+)\s*(\w+),\s*(\d+)%/
+  );
+  if (transferMatch) {
+    result.uploadedBytes = toBytes(parseFloat(transferMatch[1]), transferMatch[2]);
+    result.totalBytes    = toBytes(parseFloat(transferMatch[3]), transferMatch[4]);
+    result.percentage    = parseInt(transferMatch[5], 10);
+  }
+
+  const speedMatch = line.match(/([\d.]+)\s*(\w+)\/s/);
+  if (speedMatch) {
+    result.speedBytes = toBytes(parseFloat(speedMatch[1]), speedMatch[2]);
+  }
+
+  const etaMatch = line.match(/ETA\s+(\S+)/);
+  if (etaMatch) {
+    result.etaSeconds = parseEta(etaMatch[1]);
+  }
+
+  const fileMatch = line.match(/Transferred:\s+(\d+)\s*\/\s*(\d+),/);
+  if (fileMatch) {
+    result.processedFiles = parseInt(fileMatch[1], 10);
+    result.totalFiles     = parseInt(fileMatch[2], 10);
+  }
+
+  return result;
+}
+
+function toBytes(value, unit) {
+  const u = unit.toUpperCase();
+  if (u === 'B'   || u === 'BYTES') return value;
+  if (u === 'KIB' || u === 'KB')    return value * 1024;
+  if (u === 'MIB' || u === 'MB')    return value * 1024 * 1024;
+  if (u === 'GIB' || u === 'GB')    return value * 1024 * 1024 * 1024;
+  if (u === 'TIB' || u === 'TB')    return value * 1024 * 1024 * 1024 * 1024;
+  return value;
+}
+
+function parseEta(etaStr) {
+  if (!etaStr || etaStr === '-' || etaStr === 'N/A') return null;
+  let seconds = 0;
+  const h = etaStr.match(/(\d+)h/);
+  const m = etaStr.match(/(\d+)m/);
+  const s = etaStr.match(/(\d+)s/);
+  if (h) seconds += parseInt(h[1], 10) * 3600;
+  if (m) seconds += parseInt(m[1], 10) * 60;
+  if (s) seconds += parseInt(s[1], 10);
+  return seconds;
+}
+
+function formatBytes(bytes) {
+  if (!bytes || bytes < 1)           return '0 B';
+  if (bytes < 1024)                  return `${bytes} B`;
+  if (bytes < 1024 * 1024)           return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024)   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
+// ── Run rclone with spawn and stream progress ─────────────────────────────────
+function runRcloneWithProgress(args, progressCallback) {
+  return new Promise((resolve, reject) => {
+    const proc = spawn('rclone', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stderr = '';
+    let lastStats = {};
+    let buffer = '';
+
+    const processChunk = (chunk) => {
+      buffer += chunk.toString();
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+
+      for (const line of lines) {
+        const clean = line.replace(/\x1b\[[0-9;]*m/g, '').trim();
+        if (!clean) continue;
+        stderr += clean + '\n';
+
+        const stats = parseRcloneStats(clean);
+        if (Object.keys(stats).length > 0) {
+          lastStats = { ...lastStats, ...stats };
+          if (progressCallback) progressCallback({ ...lastStats });
+        }
+      }
+    };
+
+    proc.stdout.on('data', processChunk);
+    proc.stderr.on('data', processChunk);
+
+    proc.on('close', (code) => {
+      if (code === 0) {
+        resolve(lastStats);
+      } else {
+        const msg = stderr || `rclone exited with code ${code}`;
+        if (msg.includes('invalid_grant') || msg.includes('Invalid JWT Signature')) {
+          reject(new Error('Google Drive credentials are invalid or revoked. Please re-authenticate.'));
+        } else {
+          reject(new Error(`Rclone failed: ${msg.slice(0, 500)}`));
+        }
+      }
+    });
+
+    proc.on('error', (err) => {
+      reject(new Error(`Failed to start rclone: ${err.message}`));
+    });
+  });
+}
+
+// ── Backup service ──────────────────────────────────────────────────────────
+async function performBackup(io) {
+  const emit = (stage, extra = {}) => {
+    if (!io) return;
+    io.emit('backup_progress', { stage, ...extra, ts: Date.now() });
+  };
+
+  const dbPath = path.join(__dirname, '..', 'db', 'dev.db');
+  const uploadsPath = path.join(__dirname, '..', 'uploads');
+  const rcloneArgs = [
+    '--config', RCLONE_CONFIG,
+    '--stats', '2s',
+    '--stats-one-line'
+  ];
+
+  const timestamp = new Date().toISOString();
+
+  try {
+    // Create local JSON backup
+    emit('Creating local backup...', { overallPct: 1, stageLabel: 'Stage 1 / 3' });
+    const dateStr = new Date().toISOString().slice(0, 10);
+    const backupFile = path.join(BACKUPS_DIR, `Backup_${dateStr}_${Date.now()}.json`);
+    const backupData = { timestamp, type: 'database_backup' };
+    fs.writeFileSync(backupFile, JSON.stringify(backupData, null, 2));
+
+    // Stage 1: DB file (0-5%)
+    emit('Backing up database...', { overallPct: 2, stageLabel: 'Stage 1 / 3' });
+    await runRcloneWithProgress(
+      [...rcloneArgs, 'copy', dbPath, 'gdrive:backups/db'],
+      (stats) => {
+        emit('Backing up database...', {
+          overallPct: 2 + Math.round((stats.percentage || 0) * 0.03),
+          stageLabel: 'Stage 1 / 3'
+        });
+      }
+    );
+    emit('Database backed up', { overallPct: 5, stageLabel: 'Stage 1 / 3' });
+
+    // Stage 2: Uploads folder (6-93%)
+    let uploadExists = fs.existsSync(uploadsPath);
+    if (uploadExists) {
+      emit('Scanning uploads...', { overallPct: 6, stageLabel: 'Stage 2 / 3' });
+      await runRcloneWithProgress(
+        [...rcloneArgs, 'copy', uploadsPath, 'gdrive:backups/uploads'],
+        (stats) => {
+          const overallPct = 6 + Math.round((stats.percentage || 0) * 0.87);
+          emit('Uploading files...', {
+            overallPct,
+            stageLabel: 'Stage 2 / 3',
+            processedFiles:    stats.processedFiles,
+            totalFiles:        stats.totalFiles,
+            uploadedBytesLabel: formatBytes(stats.uploadedBytes),
+            totalBytesLabel:    formatBytes(stats.totalBytes),
+            speedLabel:         formatBytes(stats.speedBytes) + '/s',
+            etaSeconds:         stats.etaSeconds,
+            rclonePct:          stats.percentage
+          });
+        }
+      );
+      emit('Files uploaded', { overallPct: 94, stageLabel: 'Stage 2 / 3' });
+    } else {
+      emit('No uploads folder found (skipping)', { overallPct: 94, stageLabel: 'Stage 2 / 3' });
+    }
+
+    // Stage 3: JSON backups (94-99%)
+    emit('Uploading backups metadata...', { overallPct: 95, stageLabel: 'Stage 3 / 3' });
+    await runRcloneWithProgress(
+      [...rcloneArgs, 'copy', BACKUPS_DIR, 'gdrive:backups/json'],
+      () => {
+        emit('Uploading backups metadata...', { overallPct: 97, stageLabel: 'Stage 3 / 3' });
+      }
+    );
+
+    // Cleanup old backups (keep last 30 days)
+    const files = fs.readdirSync(BACKUPS_DIR);
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    for (const file of files) {
+      const filePath = path.join(BACKUPS_DIR, file);
+      const stat = fs.statSync(filePath);
+      if (stat.mtime < thirtyDaysAgo) {
+        fs.unlinkSync(filePath);
+        console.log(`Deleted old backup: ${file}`);
+      }
+    }
+
+    emit('Backup complete!', {
+      overallPct: 100,
+      stageLabel: 'Complete',
+      status: 'success',
+      timestamp
+    });
+
+    console.log('Backup completed successfully at', timestamp);
+    return timestamp;
+  } catch (error) {
+    console.error('Backup error:', error.message);
+    emit('Backup failed', {
+      status: 'failed',
+      error: error.message,
+      overallPct: 0
+    });
+    throw error;
+  }
+}
+
+export { performBackup };
