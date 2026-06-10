@@ -33,15 +33,34 @@ class TrackingService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
-        locationCallback = object : LocationCallback() {
-            override fun onLocationResult(result: LocationResult) {
-                super.onLocationResult(result)
-                result.locations.forEach { location -> processLocation(location) }
+        try {
+            android.util.Log.i("TrackingService", "===== TrackingService.onCreate() START =====")
+            fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
+            android.util.Log.i("TrackingService", "✓ FusedLocationProviderClient initialized")
+            
+            locationCallback = object : LocationCallback() {
+                override fun onLocationResult(result: LocationResult) {
+                    super.onLocationResult(result)
+                    android.util.Log.i("TrackingService", "Got ${result.locations.size} location update(s)")
+                    result.locations.forEach { location -> 
+                        android.util.Log.d("TrackingService", "Location received: lat=${location.latitude}, lng=${location.longitude}")
+                        processLocation(location) 
+                    }
+                }
             }
+            android.util.Log.i("TrackingService", "✓ LocationCallback initialized")
+            
+            startForegroundServiceNotification()
+            android.util.Log.i("TrackingService", "✓ Foreground notification started")
+            
+            startLocationUpdates()
+            android.util.Log.i("TrackingService", "✓ Location updates requested")
+            android.util.Log.i("TrackingService", "===== TrackingService.onCreate() SUCCESS =====")
+        } catch (e: Exception) {
+            android.util.Log.e("TrackingService", "❌ CRITICAL ERROR in onCreate(): ${e.message}", e)
+            e.printStackTrace()
+            stopSelf()
         }
-        startForegroundServiceNotification()
-        startLocationUpdates()
     }
 
     private fun startForegroundServiceNotification() {
@@ -89,14 +108,19 @@ class TrackingService : Service() {
     private fun processLocation(location: Location) {
         CoroutineScope(Dispatchers.IO).launch {
             try {
+                android.util.Log.d("TrackingService", ">>> processLocation() START")
                 val point = LocationEntity(
                     latitude = location.latitude,
                     longitude = location.longitude,
                     recordedAt = System.currentTimeMillis(),
                 )
                 android.util.Log.d("TrackingService", "Processing location: lat=${location.latitude}, lng=${location.longitude}")
+                
                 val dao = AppDatabase.getInstance(this@TrackingService).locationDao()
+                android.util.Log.d("TrackingService", "✓ Database DAO initialized")
+                
                 val token = AuthManager.getToken(this@TrackingService)
+                android.util.Log.d("TrackingService", "Auth token: ${if (token != null) "present" else "MISSING"}")
                 token?.let { ApiClient.setToken(it) }
 
                 if (token == null) {
@@ -113,16 +137,21 @@ class TrackingService : Service() {
                     return@launch
                 }
 
+                android.util.Log.d("TrackingService", "Attempting to upload location...")
                 val success = ApiClient.uploadLocations(this@TrackingService, listOf(point))
                 if (success) {
-                    android.util.Log.i("TrackingService", "Location uploaded successfully: lat=${point.latitude}, lng=${point.longitude}")
+                    android.util.Log.i("TrackingService", "✓ Location uploaded successfully: lat=${point.latitude}, lng=${point.longitude}")
                 } else {
-                    android.util.Log.w("TrackingService", "Upload failed (status unknown). Storing location offline.")
+                    android.util.Log.w("TrackingService", "❌ Upload failed. Storing location offline.")
                     dao.insert(point)
                     scheduleSyncJob()
                 }
+                android.util.Log.d("TrackingService", "<<< processLocation() END")
+            } catch (e: SecurityException) {
+                android.util.Log.e("TrackingService", "❌ SECURITY EXCEPTION: Location permission denied? ${e.message}", e)
             } catch (e: Exception) {
-                android.util.Log.e("TrackingService", "Error processing location", e)
+                android.util.Log.e("TrackingService", "❌ ERROR processing location: ${e.message}", e)
+                e.printStackTrace()
             }
         }
     }
