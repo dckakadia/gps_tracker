@@ -2,6 +2,10 @@ import { query } from './index.js';
 
 export async function initializeUsername() {
   try {
+    // First, ensure the username column exists
+    await query('ALTER TABLE users ADD COLUMN IF NOT EXISTS username TEXT UNIQUE');
+    console.log('✓ Username column verified (created if missing)');
+
     // Try to set username for existing admin user (dckakadia)
     const adminUser = await query("SELECT id FROM users WHERE email = 'dckakadia@gmail.com'");
     if (adminUser.rowCount > 0) {
@@ -10,11 +14,7 @@ export async function initializeUsername() {
       console.log('✓ Admin user username set to "dckakadia"');
     }
   } catch (err) {
-    // If column doesn't exist or other errors, log but don't fail startup
-    if (err.message.includes('column "username" of relation "users" does not exist')) {
-      console.log('⚠ Username column does not exist. Run schema migration: ALTER TABLE users ADD COLUMN username TEXT UNIQUE;');
-    } else {
-      console.log('ℹ Username initialization info:', err.message);
-    }
+    console.error('✗ Error during username initialization:', err.message);
+    throw err;
   }
 }
