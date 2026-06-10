@@ -63,11 +63,13 @@ class TrackingService : Service() {
     }
 
     private fun startLocationUpdates() {
+        // TEST/DEBUG MODE: Use frequent updates with no displacement threshold
+        // Production: interval = 10 * 60 * 1000L, smallestDisplacement = 100f
         val request = LocationRequest.create().apply {
-            interval = 10 * 60 * 1000L
-            fastestInterval = 5 * 60 * 1000L
-            smallestDisplacement = 100f
-            priority = LocationRequest.PRIORITY_BALANCED_POWER_ACCURACY
+            interval = 30 * 1000L  // 30 seconds for testing
+            fastestInterval = 10 * 1000L  // 10 seconds
+            smallestDisplacement = 0f  // No displacement threshold (allows rapid testing)
+            priority = LocationRequest.PRIORITY_HIGH_ACCURACY
         }
 
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED &&
@@ -113,9 +115,9 @@ class TrackingService : Service() {
 
                 val success = ApiClient.uploadLocations(this@TrackingService, listOf(point))
                 if (success) {
-                    android.util.Log.i("TrackingService", "Location uploaded successfully")
+                    android.util.Log.i("TrackingService", "Location uploaded successfully: lat=${point.latitude}, lng=${point.longitude}")
                 } else {
-                    android.util.Log.w("TrackingService", "Upload failed. Storing location offline.")
+                    android.util.Log.w("TrackingService", "Upload failed (status unknown). Storing location offline.")
                     dao.insert(point)
                     scheduleSyncJob()
                 }

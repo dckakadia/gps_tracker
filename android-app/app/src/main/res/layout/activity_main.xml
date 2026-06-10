@@ -15,4 +15,15 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         android:layout_margin="24dp" />
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/testUploadButton"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:text="TEST: Upload Now"
+        android:backgroundTint="@android:color/holo_orange_dark"
+        app:layout_constraintTop_toBottomOf="@id/startTrackingButton"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_margin="24dp" />
 </androidx.constraintlayout.widget.ConstraintLayout>
