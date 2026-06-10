@@ -11,6 +11,7 @@ import locationRoutes from './routes/locations.js';
 import backupRoutes from './routes/backup.js';
 import { performBackup } from './services/backup.js';
 import { initializeUsername } from './db/init-username.js';
+import { initializeUploadAudit } from './db/init-upload-audit.js';
 import pool from './db/index.js';
 
 dotenv.config();
@@ -81,5 +82,11 @@ httpServer.listen(port, async () => {
     await initializeUsername();
   } catch (err) {
     console.error('Failed to initialize username:', err.message);
+  }
+
+  try {
+    await initializeUploadAudit();
+  } catch (err) {
+    console.error('Failed to initialize upload audit table:', err.message);
   }
 });

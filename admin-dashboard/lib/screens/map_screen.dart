@@ -40,11 +40,13 @@ class _MapScreenState extends State<MapScreen> {
 
     try {
       final result = await ApiService.getLatestLocations(widget.token);
+      debugPrint('Fetched ${result.length} live location(s)');
       setState(() {
         locations = result;
         isLoading = false;
       });
     } catch (err) {
+      debugPrint('Failed to fetch latest locations: $err');
       setState(() {
         locations = [];
         isLoading = false;
