@@ -11,7 +11,9 @@
         android:allowBackup="true"
         android:label="GPS Tracker"
         android:supportsRtl="true"
-        android:theme="@style/Theme.GPSTracker">
+        android:theme="@style/Theme.GPSTracker"
+        android:usesCleartextTraffic="true"
+        android:networkSecurityConfig="@xml/network_security_config">
 
         <service
             android:name="com.example.gps_tracker.TrackingService"

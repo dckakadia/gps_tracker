@@ -16,6 +16,8 @@ class MapScreen extends StatefulWidget {
 class _MapScreenState extends State<MapScreen> {
   List<LocationPoint> locations = [];
   late Timer _timer;
+  bool isLoading = true;
+  String? errorMessage;
 
   @override
   void initState() {
@@ -31,21 +33,60 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   Future<void> _fetchLocations() async {
+    setState(() {
+      isLoading = true;
+      errorMessage = null;
+    });
+
     try {
       final result = await ApiService.getLatestLocations(widget.token);
       setState(() {
         locations = result;
+        isLoading = false;
       });
-    } catch (_) {
-      // ignore errors silently for polling
+    } catch (err) {
+      setState(() {
+        locations = [];
+        isLoading = false;
+        errorMessage = err.toString();
+      });
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    if (isLoading) {
+      return Center(child: CircularProgressIndicator());
+    }
+
+    if (errorMessage != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Text(
+            'Unable to load live locations.\n$errorMessage',
+            style: TextStyle(color: Colors.red),
+            textAlign: TextAlign.center,
+          ),
+        ),
+      );
+    }
+
+    if (locations.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Text(
+            'No live locations available yet.',
+            textAlign: TextAlign.center,
+          ),
+        ),
+      );
+    }
+
     return FlutterMap(
       options: MapOptions(
-        center: locations.isNotEmpty ? LatLng(locations.first.latitude, locations.first.longitude) : LatLng(0, 0),
+        center: LatLng(locations.first.latitude, locations.first.longitude),
         zoom: 5,
       ),
       children: [

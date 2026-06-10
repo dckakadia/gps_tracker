@@ -32,7 +32,7 @@ object ApiClient {
         return withContext(Dispatchers.IO) {
             try {
                 val bodyJson = mapAdapter.toJson(mapOf(
-                    "email" to email,
+                    "identifier" to email,
                     "password" to password,
                 ))
                 val request = Request.Builder()
@@ -55,8 +55,9 @@ object ApiClient {
                     }
                 }
             } catch (err: Exception) {
+                android.util.Log.e("ApiClient", "Login exception", err)
                 err.printStackTrace()
-                return@withContext LoginResult(false, null, "Network error")
+                return@withContext LoginResult(false, null, err.message ?: "Network error")
             }
         }
     }
@@ -64,6 +65,11 @@ object ApiClient {
     suspend fun uploadLocations(context: Context, points: List<LocationEntity>): Boolean {
         return withContext(Dispatchers.IO) {
             try {
+                if (authToken == null) {
+                    android.util.Log.w("ApiClient", "Upload attempted without auth token")
+                    return@withContext false
+                }
+
                 val json = adapter.toJson(points.map { point ->
                     mapOf(
                         "latitude" to point.latitude,
@@ -71,6 +77,7 @@ object ApiClient {
                         "recorded_at" to point.recordedAt
                     )
                 })
+                android.util.Log.d("ApiClient", "Uploading ${points.size} location(s)")
                 val builder = Request.Builder()
                     .url("$BASE_URL/locations")
                     .post(json.toRequestBody("application/json; charset=utf-8".toMediaType()))
@@ -81,10 +88,17 @@ object ApiClient {
 
                 val request = builder.build()
                 client.newCall(request).execute().use { response ->
-                    return@withContext response.isSuccessful
+                    val success = response.isSuccessful
+                    if (success) {
+                        android.util.Log.d("ApiClient", "Upload succeeded (status: ${response.code})")
+                    } else {
+                        val body = response.body?.string()
+                        android.util.Log.e("ApiClient", "Upload failed (status: ${response.code}, body: $body)")
+                    }
+                    return@withContext success
                 }
             } catch (err: Exception) {
-                err.printStackTrace()
+                android.util.Log.e("ApiClient", "Upload exception", err)
                 return@withContext false
             }
         }

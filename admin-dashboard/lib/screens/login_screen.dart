@@ -24,6 +24,14 @@ class _LoginScreenState extends State<LoginScreen> {
     try {
       final response = await ApiService.login(_identifierController.text.trim(), _passwordController.text.trim());
       if (response.containsKey('token')) {
+        final user = response['user'];
+        if (user is Map<String, dynamic> && user['role'] != 'admin') {
+          setState(() {
+            _error = 'Admin access required. Please login with an admin account.';
+          });
+          return;
+        }
+
         Navigator.of(context).pushReplacement(MaterialPageRoute(
           builder: (_) => DashboardScreen(token: response['token']),
         ));

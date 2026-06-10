@@ -72,32 +72,55 @@ class TrackingService : Service() {
 
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED &&
             ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            android.util.Log.e("TrackingService", "Location permissions not granted. Tracking cannot start.")
             return
         }
 
-        fusedLocationClient.requestLocationUpdates(request, locationCallback, mainLooper)
+        try {
+            fusedLocationClient.requestLocationUpdates(request, locationCallback, mainLooper)
+            android.util.Log.i("TrackingService", "Location updates requested successfully")
+        } catch (e: Exception) {
+            android.util.Log.e("TrackingService", "Error requesting location updates", e)
+        }
     }
 
     private fun processLocation(location: Location) {
         CoroutineScope(Dispatchers.IO).launch {
-            val point = LocationEntity(
-                latitude = location.latitude,
-                longitude = location.longitude,
-                recordedAt = System.currentTimeMillis(),
-            )
-            val dao = AppDatabase.getInstance(this@TrackingService).locationDao()
-            val token = AuthManager.getToken(this@TrackingService)
-            token?.let { ApiClient.setToken(it) }
+            try {
+                val point = LocationEntity(
+                    latitude = location.latitude,
+                    longitude = location.longitude,
+                    recordedAt = System.currentTimeMillis(),
+                )
+                android.util.Log.d("TrackingService", "Processing location: lat=${location.latitude}, lng=${location.longitude}")
+                val dao = AppDatabase.getInstance(this@TrackingService).locationDao()
+                val token = AuthManager.getToken(this@TrackingService)
+                token?.let { ApiClient.setToken(it) }
 
-            if (NetworkUtils.isInternetAvailable(this@TrackingService) && token != null) {
+                if (token == null) {
+                    android.util.Log.w("TrackingService", "No auth token found. Storing location offline.")
+                    dao.insert(point)
+                    scheduleSyncJob()
+                    return@launch
+                }
+
+                if (!NetworkUtils.isInternetAvailable(this@TrackingService)) {
+                    android.util.Log.w("TrackingService", "No internet connection. Storing location offline.")
+                    dao.insert(point)
+                    scheduleSyncJob()
+                    return@launch
+                }
+
                 val success = ApiClient.uploadLocations(this@TrackingService, listOf(point))
-                if (!success) {
+                if (success) {
+                    android.util.Log.i("TrackingService", "Location uploaded successfully")
+                } else {
+                    android.util.Log.w("TrackingService", "Upload failed. Storing location offline.")
                     dao.insert(point)
                     scheduleSyncJob()
                 }
-            } else {
-                dao.insert(point)
-                scheduleSyncJob()
+            } catch (e: Exception) {
+                android.util.Log.e("TrackingService", "Error processing location", e)
             }
         }
     }

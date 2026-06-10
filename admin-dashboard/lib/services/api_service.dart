@@ -4,8 +4,8 @@ import '../models/user.dart';
 import '../models/location_point.dart';
 
 class ApiService {
-  static const String baseUrl = 'http://localhost:4000/api';
-  // For production, change to: 'http://192.168.2.101:4000/api'
+  static const String baseUrl = 'http://116.74.77.22:8095/api';
+  // The server is exposed on port 8095 for the Flutter web/dashboard deployment.
 
   static Future<Map<String, dynamic>> login(String identifier, String password) async {
     try {
@@ -17,19 +17,19 @@ class ApiService {
 
       final Map<String, dynamic> body = response.body.isNotEmpty
           ? jsonDecode(response.body) as Map<String, dynamic>
-          : {};
+          : <String, dynamic>{};
 
       if (response.statusCode >= 200 && response.statusCode < 300) {
         return body;
       }
 
-      return {
+      return <String, dynamic>{
         'error': body['error'] ?? 'Server error',
         'statusCode': response.statusCode,
         'body': body,
       };
     } catch (err) {
-      return {
+      return <String, dynamic>{
         'error': 'Network error: ${err.toString()}',
       };
     }
@@ -40,7 +40,7 @@ class ApiService {
       Uri.parse('$baseUrl/admin/users'),
       headers: {'Authorization': 'Bearer ' + token},
     );
-    final body = response.body.isNotEmpty ? jsonDecode(response.body) as Map<String, dynamic> : {};
+    final body = response.body.isNotEmpty ? jsonDecode(response.body) as Map<String, dynamic> : <String, dynamic>{};
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw Exception(body['error'] ?? 'Failed to load users');
     }
@@ -53,7 +53,7 @@ class ApiService {
       headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
       body: jsonEncode({'name': name, 'email': email, 'password': password, 'role': role}),
     );
-    final body = response.body.isNotEmpty ? jsonDecode(response.body) as Map<String, dynamic> : {};
+    final body = response.body.isNotEmpty ? jsonDecode(response.body) as Map<String, dynamic> : <String, dynamic>{};
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw Exception(body['error'] ?? 'Failed to create user');
     }
@@ -74,7 +74,7 @@ class ApiService {
       headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
       body: jsonEncode(bodyMap),
     );
-    final body = response.body.isNotEmpty ? jsonDecode(response.body) as Map<String, dynamic> : {};
+    final body = response.body.isNotEmpty ? jsonDecode(response.body) as Map<String, dynamic> : <String, dynamic>{};
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw Exception(body['error'] ?? 'Failed to update user');
     }
@@ -86,7 +86,7 @@ class ApiService {
       Uri.parse('$baseUrl/admin/users/$id'),
       headers: {'Authorization': 'Bearer ' + token},
     );
-    final body = response.body.isNotEmpty ? jsonDecode(response.body) as Map<String, dynamic> : {};
+    final body = response.body.isNotEmpty ? jsonDecode(response.body) as Map<String, dynamic> : <String, dynamic>{};
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw Exception(body['error'] ?? 'Failed to delete user');
     }
@@ -98,7 +98,17 @@ class ApiService {
       Uri.parse('$baseUrl/locations/latest'),
       headers: {'Authorization': 'Bearer ' + token},
     );
-    final body = jsonDecode(response.body);
-    return (body['locations'] as List).map((item) => LocationPoint.fromJson(item)).toList();
+
+    final body = response.body.isNotEmpty
+        ? jsonDecode(response.body) as Map<String, dynamic>
+        : <String, dynamic>{};
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception(body['error'] ?? 'Failed to load live locations');
+    }
+
+    return (body['locations'] as List)
+        .map((item) => LocationPoint.fromJson(item))
+        .toList();
   }
 }

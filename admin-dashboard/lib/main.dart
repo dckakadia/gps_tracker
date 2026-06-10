@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'dart:io';
 import 'screens/login_screen.dart';
 import 'screens/dashboard_screen.dart';
 
 void main() {
+  HttpOverrides.global = MyHttpOverrides();
   runApp(AdminDashboardApp());
 }
 
@@ -17,5 +19,14 @@ class AdminDashboardApp extends StatelessWidget {
         '/login': (context) => LoginScreen(),
       },
     );
+  }
+}
+
+class MyHttpOverrides extends HttpOverrides {
+  @override
+  HttpClient createHttpClient(SecurityContext? context) {
+    return super.createHttpClient(context)
+      ..badCertificateCallback =
+          (X509Certificate cert, String host, int port) => true;
   }
 }
