@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'dart:async';
+import '../services/api_service.dart';
 
 class BackupScreen extends StatefulWidget {
   final String token;
@@ -13,8 +14,6 @@ class BackupScreen extends StatefulWidget {
 }
 
 class _BackupScreenState extends State<BackupScreen> {
-  static const String baseUrl = 'http://192.168.2.101:4000/api';
-
   bool _isBackingUp = false;
   Map<String, dynamic>? _backupProgress;
   Timer? _statusCheckTimer;
@@ -34,7 +33,7 @@ class _BackupScreenState extends State<BackupScreen> {
   Future<void> _checkBackupStatus() async {
     try {
       final response = await http.get(
-        Uri.parse('$baseUrl/backup/status'),
+        Uri.parse('${ApiService.baseUrl}/backup/status'),
         headers: {'Authorization': 'Bearer ' + widget.token},
       );
 
@@ -75,7 +74,7 @@ class _BackupScreenState extends State<BackupScreen> {
 
     try {
       final response = await http.post(
-        Uri.parse('$baseUrl/backup'),
+        Uri.parse('${ApiService.baseUrl}/backup'),
         headers: {
           'Authorization': 'Bearer ' + widget.token,
           'Content-Type': 'application/json'

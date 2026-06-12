@@ -7,14 +7,19 @@ class ApiService {
   static const String baseUrl = 'http://116.74.77.22:8095/api';
   // The server is exposed on port 8095 for the Flutter web/dashboard deployment.
 
+  static Uri buildUri(String path) => Uri.parse('$baseUrl$path');
+
   static Future<Map<String, dynamic>> login(String identifier, String password) async {
+    final uri = buildUri('/auth/login');
+    print('ApiService.login calling $uri');
     try {
       final response = await http.post(
-        Uri.parse('$baseUrl/auth/login'),
+        uri,
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'identifier': identifier, 'password': password}),
       );
 
+      print('ApiService.login status=${response.statusCode} body=${response.body}');
       final Map<String, dynamic> body = response.body.isNotEmpty
           ? jsonDecode(response.body) as Map<String, dynamic>
           : <String, dynamic>{};
@@ -28,7 +33,9 @@ class ApiService {
         'statusCode': response.statusCode,
         'body': body,
       };
-    } catch (err) {
+    } catch (err, stackTrace) {
+      print('ApiService.login exception: $err');
+      print(stackTrace);
       return <String, dynamic>{
         'error': 'Network error: ${err.toString()}',
       };
@@ -36,10 +43,13 @@ class ApiService {
   }
 
   static Future<List<UserModel>> getUsers(String token) async {
+    final uri = buildUri('/admin/users');
+    print('ApiService.getUsers calling $uri');
     final response = await http.get(
-      Uri.parse('$baseUrl/admin/users'),
+      uri,
       headers: {'Authorization': 'Bearer ' + token},
     );
+    print('ApiService.getUsers status=${response.statusCode} body=${response.body}');
     final body = response.body.isNotEmpty ? jsonDecode(response.body) as Map<String, dynamic> : <String, dynamic>{};
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw Exception(body['error'] ?? 'Failed to load users');
@@ -48,11 +58,14 @@ class ApiService {
   }
 
   static Future<Map<String, dynamic>> createUser(String token, String name, String email, String password, [String role = 'salesperson']) async {
+    final uri = buildUri('/admin/users');
+    print('ApiService.createUser calling $uri');
     final response = await http.post(
-      Uri.parse('$baseUrl/admin/users'),
+      uri,
       headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
       body: jsonEncode({'name': name, 'email': email, 'password': password, 'role': role}),
     );
+    print('ApiService.createUser status=${response.statusCode} body=${response.body}');
     final body = response.body.isNotEmpty ? jsonDecode(response.body) as Map<String, dynamic> : <String, dynamic>{};
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw Exception(body['error'] ?? 'Failed to create user');
@@ -69,11 +82,14 @@ class ApiService {
       bodyMap['role'] = role;
     }
 
+    final uri = buildUri('/admin/users/$id');
+    print('ApiService.updateUser calling $uri');
     final response = await http.put(
-      Uri.parse('$baseUrl/admin/users/$id'),
+      uri,
       headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
       body: jsonEncode(bodyMap),
     );
+    print('ApiService.updateUser status=${response.statusCode} body=${response.body}');
     final body = response.body.isNotEmpty ? jsonDecode(response.body) as Map<String, dynamic> : <String, dynamic>{};
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw Exception(body['error'] ?? 'Failed to update user');
@@ -82,10 +98,13 @@ class ApiService {
   }
 
   static Future<Map<String, dynamic>> deleteUser(String token, int id) async {
+    final uri = buildUri('/admin/users/$id');
+    print('ApiService.deleteUser calling $uri');
     final response = await http.delete(
-      Uri.parse('$baseUrl/admin/users/$id'),
+      uri,
       headers: {'Authorization': 'Bearer ' + token},
     );
+    print('ApiService.deleteUser status=${response.statusCode} body=${response.body}');
     final body = response.body.isNotEmpty ? jsonDecode(response.body) as Map<String, dynamic> : <String, dynamic>{};
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw Exception(body['error'] ?? 'Failed to delete user');
@@ -94,10 +113,13 @@ class ApiService {
   }
 
   static Future<List<LocationPoint>> getLatestLocations(String token) async {
+    final uri = buildUri('/locations/latest');
+    print('ApiService.getLatestLocations calling $uri');
     final response = await http.get(
-      Uri.parse('$baseUrl/locations/latest'),
+      uri,
       headers: {'Authorization': 'Bearer ' + token},
     );
+    print('ApiService.getLatestLocations status=${response.statusCode} body=${response.body}');
 
     final body = response.body.isNotEmpty
         ? jsonDecode(response.body) as Map<String, dynamic>
@@ -107,7 +129,9 @@ class ApiService {
       throw Exception(body['error'] ?? 'Failed to load live locations');
     }
 
-    return (body['locations'] as List)
+    final locations = (body['locations'] as List?) ?? <dynamic>[];
+    print('ApiService.getLatestLocations parsed locations count=${locations.length}');
+    return locations
         .map((item) => LocationPoint.fromJson(item))
         .toList();
   }

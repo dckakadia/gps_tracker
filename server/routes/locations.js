@@ -45,10 +45,10 @@ router.post('/', authorize, async (req, res) => {
         console.warn('Invalid location point skipped', { index, point });
         return;
       }
-      validPointsCount += 1;
-      const idx = index * 4;
+      const idx = validPointsCount * 4;
       placeholders.push(`($${idx + 1}, $${idx + 2}, $${idx + 3}, to_timestamp($${idx + 4}::double precision / 1000), NOW())`);
       values.push(userId, latitude, longitude, recorded_at);
+      validPointsCount += 1;
     });
 
     if (!placeholders.length) {

@@ -115,15 +115,19 @@ object ApiClient {
                 var attempt = 1
                 while (attempt <= maxAttempts) {
                     try {
+                        val requestUrl = "$BASE_URL/locations"
                         val builder = Request.Builder()
-                            .url("$BASE_URL/locations")
+                            .url(requestUrl)
+                            .addHeader("Content-Type", "application/json")
                             .post(json.toRequestBody("application/json; charset=utf-8".toMediaType()))
 
+                        val tokenPresent = authToken != null
                         authToken?.let {
                             builder.addHeader("Authorization", "Bearer $it")
                         }
 
                         val request = builder.build()
+                        android.util.Log.d("ApiClient", "Uploading locations to $requestUrl tokenPresent=$tokenPresent")
                         client.newCall(request).execute().use { response ->
                             val body = response.body?.string()
                             if (response.isSuccessful) {
@@ -131,8 +135,8 @@ object ApiClient {
                                 LogPersistor.append(context, "ApiClient", "Upload SUCCESS — ${points.size} points sent")
                                 return@withContext true
                             } else {
-                                android.util.Log.e("ApiClient", "Upload FAILED — HTTP status: ${response.code}, body: $body, token present: true")
-                                LogPersistor.append(context, "ApiClient", "Upload FAILED — HTTP status: ${response.code}, body: $body, token present: true")
+                                android.util.Log.e("ApiClient", "Upload FAILED — HTTP status: ${response.code}, body: $body, tokenPresent=$tokenPresent")
+                                LogPersistor.append(context, "ApiClient", "Upload FAILED — HTTP status: ${response.code}, body: $body, tokenPresent=$tokenPresent")
                             }
                         }
                     } catch (innerErr: Exception) {
