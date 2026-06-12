@@ -106,6 +106,7 @@ router.get('/latest', authorize, requireAdmin, async (req, res) => {
          SELECT latitude, longitude, recorded_at, received_at
          FROM locations
          WHERE user_id = u.id
+           AND recorded_at >= NOW() - INTERVAL '10 minutes'
          ORDER BY recorded_at DESC
          LIMIT 1
        ) l ON true

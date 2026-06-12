@@ -68,7 +68,7 @@ class TrackingService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(channelId, "Location Tracking", NotificationManager.IMPORTANCE_LOW)
             val manager = getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(channel)
+            manager?.createNotificationChannel(channel)
         }
 
         val notification: Notification = NotificationCompat.Builder(this, channelId)
@@ -91,9 +91,8 @@ class TrackingService : Service() {
             priority = LocationRequest.PRIORITY_HIGH_ACCURACY
         }
 
-        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED &&
-            ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-            android.util.Log.e("TrackingService", "Location permissions not granted. Tracking cannot start.")
+        if (!hasRequiredLocationPermissions()) {
+            warnBackgroundPermissionMissing()
             return
         }
 
@@ -102,6 +101,26 @@ class TrackingService : Service() {
             android.util.Log.i("TrackingService", "Location updates requested successfully")
         } catch (e: Exception) {
             android.util.Log.e("TrackingService", "Error requesting location updates", e)
+        }
+    }
+
+    private fun hasRequiredLocationPermissions(): Boolean {
+        val hasFineLocation = ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        val hasCoarseLocation = ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        val hasBackgroundLocation = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_BACKGROUND_LOCATION) == PackageManager.PERMISSION_GRANTED
+        } else {
+            true
+        }
+        return (hasFineLocation || hasCoarseLocation) && hasBackgroundLocation
+    }
+
+    private fun warnBackgroundPermissionMissing() {
+        android.util.Log.e("TrackingService", "Location permissions not granted or background access denied. Tracking cannot start.")
+        LogPersistor.append(this, "TrackingService", "Location permissions not granted or background access denied. Tracking cannot start.")
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            android.util.Log.w("TrackingService", "Missing ACCESS_BACKGROUND_LOCATION on Android 10+; request background location permission in app settings.")
+            LogPersistor.append(this, "TrackingService", "Missing ACCESS_BACKGROUND_LOCATION on Android 10+; request background location permission in app settings.")
         }
     }
 
@@ -125,8 +144,11 @@ class TrackingService : Service() {
 
                 if (token == null) {
                     android.util.Log.w("TrackingService", "No auth token found. Storing location offline.")
+                    android.util.Log.d("TrackingService", "Offline point details: lat=${point.latitude}, lng=${point.longitude}, recordedAt=${point.recordedAt}")
+                    LogPersistor.append(this@TrackingService, "TrackingService", "No auth token; storing offline point: lat=${point.latitude}, lng=${point.longitude}, recordedAt=${point.recordedAt}")
                     dao.insert(point)
                     scheduleSyncJob()
+                    LogPersistor.append(this@TrackingService, "TrackingService", "Offline point persisted to DB and sync job scheduled")
                     return@launch
                 }
 
@@ -137,12 +159,15 @@ class TrackingService : Service() {
                     return@launch
                 }
 
-                android.util.Log.d("TrackingService", "Attempting to upload location...")
+                android.util.Log.d("TrackingService", "Attempting to upload location... payload: lat=${point.latitude}, lng=${point.longitude}, recordedAt=${point.recordedAt}")
+                LogPersistor.append(this@TrackingService, "TrackingService", "Attempting upload for point: lat=${point.latitude}, lng=${point.longitude}, recordedAt=${point.recordedAt}")
                 val success = ApiClient.uploadLocations(this@TrackingService, listOf(point))
                 if (success) {
                     android.util.Log.i("TrackingService", "✓ Location uploaded successfully: lat=${point.latitude}, lng=${point.longitude}")
+                    LogPersistor.append(this@TrackingService, "TrackingService", "Upload succeeded for point: lat=${point.latitude}, lng=${point.longitude}")
                 } else {
                     android.util.Log.w("TrackingService", "❌ Upload failed. Storing location offline.")
+                    LogPersistor.append(this@TrackingService, "TrackingService", "Upload failed; persisting offline point: lat=${point.latitude}, lng=${point.longitude}")
                     dao.insert(point)
                     scheduleSyncJob()
                 }
@@ -173,7 +198,13 @@ class TrackingService : Service() {
     }
 
     override fun onDestroy() {
-        fusedLocationClient.removeLocationUpdates(locationCallback)
+        try {
+            if (::fusedLocationClient.isInitialized && ::locationCallback.isInitialized) {
+                fusedLocationClient.removeLocationUpdates(locationCallback)
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("TrackingService", "Error removing location updates: ${e.message}", e)
+        }
         super.onDestroy()
     }
 }

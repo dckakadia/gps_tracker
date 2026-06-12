@@ -1,0 +1,41 @@
+Findings
+1. App permissions / manifest
+apk_permissions.txt confirms the app declares:
+ACCESS_FINE_LOCATION
+ACCESS_COARSE_LOCATION
+ACCESS_BACKGROUND_LOCATION
+INTERNET
+ACCESS_NETWORK_STATE
+WAKE_LOCK
+RECEIVE_BOOT_COMPLETED
+FOREGROUND_SERVICE
+apk_manifest_tree.txt shows:
+com.example.gps_tracker.TrackingService declared as a foreground service
+LoginActivity as launcher activity
+MainActivity
+GoogleApiActivity and AndroidX startup provider metadata
+2. Crash / termination analysis
+logcat_recent.txt contains:
+adbd service requested '... am force-stop com.example.gps_tracker'
+ActivityManager: Force stopping com.example.gps_tracker
+Killing ... com.example.gps_tracker/u0a226
+There is no clear AndroidRuntime exception stack trace for com.example.gps_tracker in the provided log files.
+WindowManager: Exception thrown during dispatchAppVisibility ... DeadObjectException is consistent with the app process being killed after a force-stop.
+Conclusion: the app was externally stopped/killed rather than showing an explicit app crash trace in these logs.
+
+3. GPS coordinate / network send evidence
+Current logs do not show any app-specific GPS/location transmission messages or outbound HTTP/HTTPS POST/GET activity from com.example.gps_tracker.
+The provided logcat_recent.txt is dominated by system and Google Play services activity, not app payload transmission.
+No direct evidence yet that the app successfully sent GPS coordinates to a server.
+4. Runtime environment status
+adb_devices.txt only contains:
+List of devices attached
+That indicates no emulator/device was visible to the adb command used when the file was captured.
+Recommendation
+To confirm runtime behavior, do these next:
+
+Make sure the emulator/device is connected and visible via adb devices.
+Grant runtime location permissions if the app requests them.
+Capture logcat while launching the app and pressing any tracking/start buttons.
+Filter on the app package (com.example.gps_tracker) and keywords like Location, requestLocationUpdates, http, https, POST, GET, TrackingService.
+If you want, I can help you with the exact adb/logcat commands to run next.

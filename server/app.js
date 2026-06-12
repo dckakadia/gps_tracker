@@ -75,9 +75,7 @@ if (process.env.ENABLE_AUTO_BACKUP === 'true') {
   console.log('Auto-backup scheduled for 2:00 AM daily');
 }
 
-httpServer.listen(port, async () => {
-  console.log(`GPS Tracker API listening on port ${port}`);
-  // Initialize username field for existing users
+const startServer = async () => {
   try {
     await initializeUsername();
   } catch (err) {
@@ -89,4 +87,10 @@ httpServer.listen(port, async () => {
   } catch (err) {
     console.error('Failed to initialize upload audit table:', err.message);
   }
-});
+
+  httpServer.listen(port, () => {
+    console.log(`GPS Tracker API listening on port ${port}`);
+  });
+};
+
+startServer();

@@ -5,6 +5,7 @@ import com.squareup.moshi.JsonAdapter
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.Types
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -66,39 +67,66 @@ object ApiClient {
         return withContext(Dispatchers.IO) {
             try {
                 if (authToken == null) {
-                    android.util.Log.w("ApiClient", "Upload attempted without auth token")
+                    android.util.Log.e("ApiClient", "UPLOAD BLOCKED — No auth token. User must log in.")
+                    LogPersistor.append(context, "ApiClient", "UPLOAD BLOCKED — No auth token. User must log in.")
                     return@withContext false
                 }
 
-                val json = adapter.toJson(points.map { point ->
+                val payload = points.map { point ->
                     mapOf(
                         "latitude" to point.latitude,
                         "longitude" to point.longitude,
                         "recorded_at" to point.recordedAt
                     )
-                })
-                android.util.Log.d("ApiClient", "Uploading ${points.size} location(s)")
-                val builder = Request.Builder()
-                    .url("$BASE_URL/locations")
-                    .post(json.toRequestBody("application/json; charset=utf-8".toMediaType()))
-
-                authToken?.let {
-                    builder.addHeader("Authorization", "Bearer $it")
                 }
 
-                val request = builder.build()
-                client.newCall(request).execute().use { response ->
-                    val success = response.isSuccessful
-                    if (success) {
-                        android.util.Log.d("ApiClient", "Upload succeeded (status: ${response.code})")
-                    } else {
-                        val body = response.body?.string()
-                        android.util.Log.e("ApiClient", "Upload failed (status: ${response.code}, body: $body)")
+                val json = adapter.toJson(payload)
+                android.util.Log.d("ApiClient", "Uploading ${points.size} location(s) payload: $json")
+                LogPersistor.append(context, "ApiClient", "Uploading ${points.size} location(s) payload: $json")
+
+                val maxAttempts = 3
+                var attempt = 1
+                while (attempt <= maxAttempts) {
+                    try {
+                        val builder = Request.Builder()
+                            .url("$BASE_URL/locations")
+                            .post(json.toRequestBody("application/json; charset=utf-8".toMediaType()))
+
+                        authToken?.let {
+                            builder.addHeader("Authorization", "Bearer $it")
+                        }
+
+                        val request = builder.build()
+                        client.newCall(request).execute().use { response ->
+                            val body = response.body?.string()
+                            if (response.isSuccessful) {
+                                android.util.Log.i("ApiClient", "Upload SUCCESS — ${points.size} points sent")
+                                LogPersistor.append(context, "ApiClient", "Upload SUCCESS — ${points.size} points sent")
+                                return@withContext true
+                            } else {
+                                android.util.Log.e("ApiClient", "Upload FAILED — HTTP status: ${response.code}, body: $body, token present: true")
+                                LogPersistor.append(context, "ApiClient", "Upload FAILED — HTTP status: ${response.code}, body: $body, token present: true")
+                            }
+                        }
+                    } catch (innerErr: Exception) {
+                        android.util.Log.e("ApiClient", "Upload exception on attempt $attempt", innerErr)
+                        LogPersistor.append(context, "ApiClient", "Upload exception on attempt $attempt: ${innerErr.message}")
                     }
-                    return@withContext success
+
+                    if (attempt < maxAttempts) {
+                        val backoff = 1000L * (1 shl (attempt - 1)) // 1s, 2s, ...
+                        android.util.Log.d("ApiClient", "Retrying upload in ${backoff}ms (attempt ${attempt + 1})")
+                        delay(backoff)
+                    }
+                    attempt++
                 }
+
+                android.util.Log.e("ApiClient", "All upload attempts failed")
+                LogPersistor.append(context, "ApiClient", "All upload attempts failed for payload: $json")
+                return@withContext false
             } catch (err: Exception) {
                 android.util.Log.e("ApiClient", "Upload exception", err)
+                LogPersistor.append(context, "ApiClient", "Upload exception: ${err.message}")
                 return@withContext false
             }
         }
