@@ -11,12 +11,39 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import javax.net.ssl.SSLContext
+import javax.net.ssl.TrustManager
+import javax.net.ssl.X509TrustManager
+import java.security.cert.X509Certificate
+import java.security.SecureRandom
 
 object ApiClient {
     private const val BASE_URL = "http://116.74.77.22:8095/api"
     private var authToken: String? = null
+    
+    // Create permissive trust manager to accept all certificates
+    private fun createPermissiveTrustManager(): X509TrustManager {
+        return object : X509TrustManager {
+            override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) {}
+            override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {}
+            override fun getAcceptedIssuers(): Array<X509Certificate>? = arrayOf()
+        }
+    }
+    
     private val client = OkHttpClient.Builder()
         .callTimeout(java.time.Duration.ofSeconds(20))
+        .also { builder ->
+            try {
+                val trustManager = createPermissiveTrustManager()
+                val sslContext = SSLContext.getInstance("TLS").apply {
+                    init(null, arrayOf<TrustManager>(trustManager), SecureRandom())
+                }
+                builder.sslSocketFactory(sslContext.socketFactory, trustManager)
+                builder.hostnameVerifier { _, _ -> true }
+            } catch (e: Exception) {
+                android.util.Log.e("ApiClient", "SSL configuration error", e)
+            }
+        }
         .build()
 
     private val moshi = Moshi.Builder().build()
