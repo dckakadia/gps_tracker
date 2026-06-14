@@ -28,6 +28,7 @@ class LoginActivity : AppCompatActivity() {
     private lateinit var errorText: TextView
     private lateinit var loadingSpinner: ProgressBar
     private val LOCATION_PERMISSION_REQUEST = 100
+    private val BACKGROUND_LOCATION_PERMISSION_REQUEST = 101
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -47,7 +48,42 @@ class LoginActivity : AppCompatActivity() {
 
         AuthManager.getToken(this)?.let { token ->
             ApiClient.setToken(token)
-            startTrackingService()
+            ensureBackgroundLocationPermissionAndStart()
+        }
+    }
+
+    private fun hasRequiredLocationPermissions(): Boolean {
+        return areHighAccuracyPermissionsGranted()
+    }
+
+    private fun areHighAccuracyPermissionsGranted(): Boolean {
+        val fineGranted = ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+
+        val coarseGranted = ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.ACCESS_COARSE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+
+        val foregroundServicePermissionGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            ContextCompat.checkSelfPermission(this, Manifest.permission.FOREGROUND_SERVICE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        } else {
+            true
+        }
+
+        return (fineGranted || coarseGranted) && foregroundServicePermissionGranted
+    }
+
+    private fun areBackgroundPermissionGranted(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.ACCESS_BACKGROUND_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+        } else {
+            true
         }
     }
 
@@ -78,92 +114,39 @@ class LoginActivity : AppCompatActivity() {
     }
 
     private fun ensureBackgroundLocationPermissionAndStart() {
+        if (!areHighAccuracyPermissionsGranted()) {
+            requestForegroundLocationPermissions()
+            return
+        }
+
+        startServiceForReal()
+
+        if (!areBackgroundPermissionGranted()) {
+            requestBackgroundLocationPermission()
+        }
+    }
+
+    private fun requestForegroundLocationPermissions() {
+        val permissions = mutableListOf(
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.ACCESS_COARSE_LOCATION
+        )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            permissions.add(Manifest.permission.FOREGROUND_SERVICE_LOCATION)
+        }
+        ActivityCompat.requestPermissions(
+            this,
+            permissions.toTypedArray(),
+            LOCATION_PERMISSION_REQUEST
+        )
+    }
+
+    private fun requestBackgroundLocationPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val backgroundGranted = ContextCompat.checkSelfPermission(
-                this,
-                Manifest.permission.ACCESS_BACKGROUND_LOCATION
-            ) == PackageManager.PERMISSION_GRANTED
-
-            val fineGranted = ContextCompat.checkSelfPermission(
-                this,
-                Manifest.permission.ACCESS_FINE_LOCATION
-            ) == PackageManager.PERMISSION_GRANTED
-
-            if (fineGranted && backgroundGranted) {
-                startServiceForReal()
-                return
-            }
-
-            // Show rationale if needed
-            if (ActivityCompat.shouldShowRequestPermissionRationale(this, Manifest.permission.ACCESS_BACKGROUND_LOCATION) ||
-                ActivityCompat.shouldShowRequestPermissionRationale(this, Manifest.permission.ACCESS_FINE_LOCATION)) {
-                AlertDialog.Builder(this)
-                    .setTitle("Location permission required")
-                    .setMessage("Background location access is required for continuous GPS tracking so your location can be shown on the live map.")
-                    .setPositiveButton("Allow") { _, _ ->
-                        ActivityCompat.requestPermissions(
-                            this,
-                            arrayOf(
-                                Manifest.permission.ACCESS_FINE_LOCATION,
-                                Manifest.permission.ACCESS_COARSE_LOCATION,
-                                Manifest.permission.ACCESS_BACKGROUND_LOCATION
-                            ),
-                            LOCATION_PERMISSION_REQUEST
-                        )
-                    }
-                    .setNegativeButton("Cancel", null)
-                    .show()
-                return
-            }
-
-            // If not granted and no rationale, request permissions first time.
             ActivityCompat.requestPermissions(
                 this,
-                arrayOf(
-                    Manifest.permission.ACCESS_FINE_LOCATION,
-                    Manifest.permission.ACCESS_COARSE_LOCATION,
-                    Manifest.permission.ACCESS_BACKGROUND_LOCATION
-                ),
-                LOCATION_PERMISSION_REQUEST
-            )
-        } else {
-            // older devices only need fine/coarse
-            val fineGranted = ContextCompat.checkSelfPermission(
-                this,
-                Manifest.permission.ACCESS_FINE_LOCATION
-            ) == PackageManager.PERMISSION_GRANTED
-
-            if (fineGranted) {
-                startServiceForReal()
-                return
-            }
-
-            if (ActivityCompat.shouldShowRequestPermissionRationale(this, Manifest.permission.ACCESS_FINE_LOCATION)) {
-                AlertDialog.Builder(this)
-                    .setTitle("Location permission required")
-                    .setMessage("Location access is required for GPS tracking so your location can be shown on the live map.")
-                    .setPositiveButton("Allow") { _, _ ->
-                        ActivityCompat.requestPermissions(
-                            this,
-                            arrayOf(
-                                Manifest.permission.ACCESS_FINE_LOCATION,
-                                Manifest.permission.ACCESS_COARSE_LOCATION
-                            ),
-                            LOCATION_PERMISSION_REQUEST
-                        )
-                    }
-                    .setNegativeButton("Cancel", null)
-                    .show()
-                return
-            }
-
-            ActivityCompat.requestPermissions(
-                this,
-                arrayOf(
-                    Manifest.permission.ACCESS_FINE_LOCATION,
-                    Manifest.permission.ACCESS_COARSE_LOCATION
-                ),
-                LOCATION_PERMISSION_REQUEST
+                arrayOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION),
+                BACKGROUND_LOCATION_PERMISSION_REQUEST
             )
         }
     }
@@ -182,33 +165,38 @@ class LoginActivity : AppCompatActivity() {
         grantResults: IntArray
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == LOCATION_PERMISSION_REQUEST) {
-            val granted = grantResults.isNotEmpty() && grantResults.all { it == PackageManager.PERMISSION_GRANTED }
-            if (granted) {
-                startServiceForReal()
-                return
-            }
-
-            // If the user denied and we should not show rationale anymore, suggest settings
-            val permanentlyDenied = Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
-                    !ActivityCompat.shouldShowRequestPermissionRationale(this, Manifest.permission.ACCESS_FINE_LOCATION)
-
-            if (permanentlyDenied) {
-                AlertDialog.Builder(this)
-                    .setTitle("Permission required")
-                    .setMessage("Background location permission was denied. To enable continuous tracking, open app settings and grant Location -> Background permission.")
-                    .setPositiveButton("Open Settings") { _, _ ->
-                        val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
-                        val uri: Uri = Uri.fromParts("package", packageName, null)
-                        intent.data = uri
-                        startActivity(intent)
+        when (requestCode) {
+            LOCATION_PERMISSION_REQUEST -> {
+                if (areHighAccuracyPermissionsGranted()) {
+                    startServiceForReal()
+                    if (!areBackgroundPermissionGranted()) {
+                        requestBackgroundLocationPermission()
                     }
-                    .setNegativeButton("Cancel") { _, _ -> displayError("Location permission is required for GPS tracking") }
-                    .show()
-            } else {
-                displayError("Location permission is required for GPS tracking")
+                    return
+                }
+            }
+            BACKGROUND_LOCATION_PERMISSION_REQUEST -> {
+                if (areHighAccuracyPermissionsGranted()) {
+                    startServiceForReal()
+                    return
+                }
             }
         }
+
+        AlertDialog.Builder(this)
+            .setTitle("Permission required")
+            .setMessage(
+                "The app needs location and foreground-service location permission " +
+                        "for continuous GPS tracking. Open app settings and grant the required permissions."
+            )
+            .setPositiveButton("Open Settings") { _, _ ->
+                val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                val uri: Uri = Uri.fromParts("package", packageName, null)
+                intent.data = uri
+                startActivity(intent)
+            }
+            .setNegativeButton("Cancel") { _, _ -> displayError("Location permission is required for GPS tracking") }
+            .show()
     }
 
     private fun displayError(message: String) {

@@ -49,10 +49,17 @@ class TrackingService : Service() {
                 }
             }
             android.util.Log.i("TrackingService", "✓ LocationCallback initialized")
-            
+
+            if (!hasRequiredLocationPermissions()) {
+                android.util.Log.e("TrackingService", "Cannot start foreground service: required location permissions are missing")
+                LogPersistor.append(this, "TrackingService", "Cannot start foreground service: required location permissions are missing")
+                stopSelf()
+                return
+            }
+
             startForegroundServiceNotification()
             android.util.Log.i("TrackingService", "✓ Foreground notification started")
-            
+
             startLocationUpdates()
             android.util.Log.i("TrackingService", "✓ Location updates requested")
             android.util.Log.i("TrackingService", "===== TrackingService.onCreate() SUCCESS =====")
@@ -112,7 +119,12 @@ class TrackingService : Service() {
         } else {
             true
         }
-        return (hasFineLocation || hasCoarseLocation) && hasBackgroundLocation
+        val hasForegroundServiceLocation = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            ActivityCompat.checkSelfPermission(this, Manifest.permission.FOREGROUND_SERVICE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        } else {
+            true
+        }
+        return (hasFineLocation || hasCoarseLocation) && hasBackgroundLocation && hasForegroundServiceLocation
     }
 
     private fun warnBackgroundPermissionMissing() {
