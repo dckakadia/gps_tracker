@@ -8,6 +8,14 @@ async function createUploadAudit({ userId, pointsCount, validPointsCount, status
   const auditQuery = `INSERT INTO location_upload_audit (user_id, points_count, valid_points_count, status, error_message, ip_address, request_body)
                       VALUES ($1, $2, $3, $4, $5, $6, $7)`;
   await query(auditQuery, [userId, pointsCount, validPointsCount, status, errorMessage || null, ipAddress || null, requestBody || null]);
+  console.info('Location upload audit saved', {
+    userId,
+    pointsCount,
+    validPointsCount,
+    status,
+    errorMessage,
+    ipAddress,
+  });
 }
 
 router.post('/', authorize, async (req, res) => {
@@ -98,21 +106,30 @@ router.post('/', authorize, async (req, res) => {
 });
 
 router.get('/latest', authorize, requireAdmin, async (req, res) => {
+  const includeStale = req.query.include_stale === 'true';
   try {
-    const result = await query(
-      `SELECT u.id AS user_id, u.name, u.email, l.latitude, l.longitude, l.recorded_at, l.received_at
+    const queryText = `SELECT u.id AS user_id,
+              u.name,
+              u.email,
+              l.latitude,
+              l.longitude,
+              l.recorded_at,
+              l.received_at,
+              (l.recorded_at >= NOW() - INTERVAL '10 minutes') AS is_live
        FROM users u
        JOIN LATERAL (
          SELECT latitude, longitude, recorded_at, received_at
          FROM locations
          WHERE user_id = u.id
-           AND recorded_at >= NOW() - INTERVAL '10 minutes'
+         ${includeStale ? '' : "AND recorded_at >= NOW() - INTERVAL '10 minutes'"}
          ORDER BY recorded_at DESC
          LIMIT 1
        ) l ON true
        WHERE u.role = 'salesperson'
-       ORDER BY u.name`);
+       ORDER BY u.name`;
 
+    const result = await query(queryText);
+    console.info('Fetch latest locations', { includeStale, count: result.rows.length });
     return res.json({ locations: result.rows });
   } catch (err) {
     console.error('Fetch latest locations error', err);

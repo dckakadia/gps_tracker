@@ -112,8 +112,8 @@ class ApiService {
     return body;
   }
 
-  static Future<List<LocationPoint>> getLatestLocations(String token) async {
-    final uri = buildUri('/locations/latest');
+  static Future<List<LocationPoint>> getLatestLocations(String token, {bool includeStale = false}) async {
+    final uri = buildUri('/locations/latest${includeStale ? '?include_stale=true' : ''}');
     print('ApiService.getLatestLocations calling $uri');
     final response = await http.get(
       uri,
@@ -130,7 +130,7 @@ class ApiService {
     }
 
     final locations = (body['locations'] as List?) ?? <dynamic>[];
-    print('ApiService.getLatestLocations parsed locations count=${locations.length}');
+    print('ApiService.getLatestLocations parsed locations count=${locations.length} includeStale=$includeStale');
     return locations
         .map((item) => LocationPoint.fromJson(item))
         .toList();

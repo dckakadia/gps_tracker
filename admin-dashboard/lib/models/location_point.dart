@@ -5,6 +5,7 @@ class LocationPoint {
   final double longitude;
   final String recordedAt;
   final String receivedAt;
+  final bool isLive;
 
   LocationPoint({
     required this.userId,
@@ -13,6 +14,7 @@ class LocationPoint {
     required this.longitude,
     required this.recordedAt,
     required this.receivedAt,
+    required this.isLive,
   });
 
   factory LocationPoint.fromJson(Map<String, dynamic> json) {
@@ -23,6 +25,7 @@ class LocationPoint {
       longitude: (json['longitude'] as num).toDouble(),
       recordedAt: json['recorded_at'],
       receivedAt: json['received_at'],
+      isLive: json['is_live'] as bool? ?? false,
     );
   }
 }
