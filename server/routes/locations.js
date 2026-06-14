@@ -7,7 +7,8 @@ const router = express.Router();
 async function createUploadAudit({ userId, pointsCount, validPointsCount, status, errorMessage, ipAddress, requestBody }) {
   const auditQuery = `INSERT INTO location_upload_audit (user_id, points_count, valid_points_count, status, error_message, ip_address, request_body)
                       VALUES ($1, $2, $3, $4, $5, $6, $7)`;
-  await query(auditQuery, [userId, pointsCount, validPointsCount, status, errorMessage || null, ipAddress || null, requestBody || null]);
+  const bodyJson = requestBody ? JSON.stringify(requestBody) : null;
+  await query(auditQuery, [userId, pointsCount, validPointsCount, status, errorMessage || null, ipAddress || null, bodyJson]);
   console.info('Location upload audit saved', {
     userId,
     pointsCount,
