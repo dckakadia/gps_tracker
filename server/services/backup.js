@@ -135,7 +135,6 @@ async function performBackup(io) {
     io.emit('backup_progress', { stage, ...extra, ts: Date.now() });
   };
 
-  const dbPath = path.join(__dirname, '..', 'db', 'dev.db');
   const uploadsPath = path.join(__dirname, '..', 'uploads');
   const rcloneArgs = [
     '--config', RCLONE_CONFIG,
@@ -153,30 +152,47 @@ async function performBackup(io) {
     const backupData = { timestamp, type: 'database_backup' };
     fs.writeFileSync(backupFile, JSON.stringify(backupData, null, 2));
 
-    // Stage 1: DB file (0-5%)
-    emit('Backing up database...', { overallPct: 2, stageLabel: 'Stage 1 / 3' });
+    // Stage 1: Dump PostgreSQL database
+    emit('Dumping PostgreSQL database...', { overallPct: 2, stageLabel: 'Stage 1 / 3' });
+    const dbDumpFile = path.join(BACKUPS_DIR, `db_dump_${dateStr}_${Date.now()}.sql`);
+    const databaseUrl = process.env.DATABASE_URL;
+    
+    if (!databaseUrl) {
+      throw new Error('DATABASE_URL not set');
+    }
+
+    // Use pg_dump to dump the database
+    const pgDumpCmd = `pg_dump "${databaseUrl}" > "${dbDumpFile}"`;
+    await execPromise(pgDumpCmd, { maxBuffer: 10 * 1024 * 1024 });
+    emit('Database dumped', { overallPct: 5, stageLabel: 'Stage 1 / 3' });
+
+    // Stage 2: Upload database dump to Google Drive
+    emit('Uploading database dump...', { overallPct: 6, stageLabel: 'Stage 2 / 3' });
     await runRcloneWithProgress(
-      [...rcloneArgs, 'copy', dbPath, 'gdrive:backups/db'],
+      [...rcloneArgs, 'copy', dbDumpFile, 'gdrive:backups/db'],
       (stats) => {
-        emit('Backing up database...', {
-          overallPct: 2 + Math.round((stats.percentage || 0) * 0.03),
-          stageLabel: 'Stage 1 / 3'
+        emit('Uploading database dump...', {
+          overallPct: 6 + Math.round((stats.percentage || 0) * 0.4),
+          stageLabel: 'Stage 2 / 3'
         });
       }
     );
-    emit('Database backed up', { overallPct: 5, stageLabel: 'Stage 1 / 3' });
+    emit('Database dump uploaded', { overallPct: 46, stageLabel: 'Stage 2 / 3' });
 
-    // Stage 2: Uploads folder (6-93%)
+    // Clean up local dump after upload
+    fs.unlinkSync(dbDumpFile);
+
+    // Stage 3: Uploads folder (47-93%)
     let uploadExists = fs.existsSync(uploadsPath);
     if (uploadExists) {
-      emit('Scanning uploads...', { overallPct: 6, stageLabel: 'Stage 2 / 3' });
+      emit('Scanning uploads...', { overallPct: 47, stageLabel: 'Stage 3 / 3' });
       await runRcloneWithProgress(
         [...rcloneArgs, 'copy', uploadsPath, 'gdrive:backups/uploads'],
         (stats) => {
-          const overallPct = 6 + Math.round((stats.percentage || 0) * 0.87);
+          const overallPct = 47 + Math.round((stats.percentage || 0) * 0.46);
           emit('Uploading files...', {
             overallPct,
-            stageLabel: 'Stage 2 / 3',
+            stageLabel: 'Stage 3 / 3',
             processedFiles:    stats.processedFiles,
             totalFiles:        stats.totalFiles,
             uploadedBytesLabel: formatBytes(stats.uploadedBytes),
@@ -187,17 +203,17 @@ async function performBackup(io) {
           });
         }
       );
-      emit('Files uploaded', { overallPct: 94, stageLabel: 'Stage 2 / 3' });
+      emit('Files uploaded', { overallPct: 94, stageLabel: 'Stage 3 / 3' });
     } else {
-      emit('No uploads folder found (skipping)', { overallPct: 94, stageLabel: 'Stage 2 / 3' });
+      emit('No uploads folder found (skipping)', { overallPct: 94, stageLabel: 'Stage 3 / 3' });
     }
 
-    // Stage 3: JSON backups (94-99%)
-    emit('Uploading backups metadata...', { overallPct: 95, stageLabel: 'Stage 3 / 3' });
+    // Final: JSON backups (94-99%)
+    emit('Uploading backups metadata...', { overallPct: 95, stageLabel: 'Final' });
     await runRcloneWithProgress(
       [...rcloneArgs, 'copy', BACKUPS_DIR, 'gdrive:backups/json'],
       () => {
-        emit('Uploading backups metadata...', { overallPct: 97, stageLabel: 'Stage 3 / 3' });
+        emit('Uploading backups metadata...', { overallPct: 97, stageLabel: 'Final' });
       }
     );
 

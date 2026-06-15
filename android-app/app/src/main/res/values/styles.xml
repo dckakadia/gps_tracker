@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.GPSTracker" parent="Theme.AppCompat.Light.NoActionBar">
+    <style name="Theme.GPSTracker" parent="Theme.MaterialComponents.Light.NoActionBar">
         <item name="colorPrimary">#1976D2</item>
         <item name="colorPrimaryDark">#115293</item>
         <item name="colorAccent">#03A9F4</item>

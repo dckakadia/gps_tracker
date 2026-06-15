@@ -96,6 +96,7 @@ object ApiClient {
                 if (authToken == null) {
                     android.util.Log.e("ApiClient", "UPLOAD BLOCKED — No auth token. User must log in.")
                     LogPersistor.append(context, "ApiClient", "UPLOAD BLOCKED — No auth token. User must log in.")
+                    LiveLogManager.log("⚠️", "Token missing — skipped")
                     return@withContext false
                 }
 
@@ -115,6 +116,7 @@ object ApiClient {
                 var attempt = 1
                 while (attempt <= maxAttempts) {
                     try {
+                        LiveLogManager.log("📡", "Uploading to server...")
                         val requestUrl = "$BASE_URL/locations"
                         val builder = Request.Builder()
                             .url(requestUrl)
@@ -133,15 +135,25 @@ object ApiClient {
                             if (response.isSuccessful) {
                                 android.util.Log.i("ApiClient", "Upload SUCCESS — ${points.size} points sent")
                                 LogPersistor.append(context, "ApiClient", "Upload SUCCESS — ${points.size} points sent")
+                                LiveLogManager.totalCount++
+                                LiveLogManager.successCount++
+                                ServerStats.incrementSuccess()
+                                LiveLogManager.log("✅", "Server: ${response.code} OK — saved")
                                 return@withContext true
                             } else {
                                 android.util.Log.e("ApiClient", "Upload FAILED — HTTP status: ${response.code}, body: $body, tokenPresent=$tokenPresent")
                                 LogPersistor.append(context, "ApiClient", "Upload FAILED — HTTP status: ${response.code}, body: $body, tokenPresent=$tokenPresent")
+                                LiveLogManager.totalCount++
+                                ServerStats.incrementTotal()
+                                LiveLogManager.log("❌", "Failed: HTTP ${response.code}")
                             }
                         }
                     } catch (innerErr: Exception) {
                         android.util.Log.e("ApiClient", "Upload exception on attempt $attempt", innerErr)
                         LogPersistor.append(context, "ApiClient", "Upload exception on attempt $attempt: ${innerErr.message}")
+                        LiveLogManager.totalCount++
+                        ServerStats.incrementTotal()
+                        LiveLogManager.log("❌", "Error: ${innerErr.message}")
                     }
 
                     if (attempt < maxAttempts) {

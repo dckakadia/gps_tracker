@@ -138,6 +138,31 @@ router.get('/latest', authorize, requireAdmin, async (req, res) => {
   }
 });
 
+router.get('/history/:userId', authorize, requireAdmin, async (req, res) => {
+  const userId = parseInt(req.params.userId, 10);
+  const date = req.query.date || new Date().toISOString().split('T')[0]; // Default to today
+  
+  try {
+    const queryText = `SELECT id,
+                              user_id,
+                              latitude,
+                              longitude,
+                              recorded_at,
+                              received_at
+                       FROM locations
+                       WHERE user_id = $1
+                       AND DATE(recorded_at) = $2
+                       ORDER BY recorded_at ASC`;
+    
+    const result = await query(queryText, [userId, date]);
+    console.info('Fetch location history', { userId, date, count: result.rows.length });
+    return res.json({ history: result.rows });
+  } catch (err) {
+    console.error('Fetch location history error', err);
+    return res.status(500).json({ error: 'Unable to fetch location history' });
+  }
+});
+
 router.get('/upload-audit', authorize, requireAdmin, async (req, res) => {
   try {
     const result = await query(

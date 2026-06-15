@@ -30,4 +30,14 @@ object AuthManager {
         inMemoryToken = token
         return token
     }
+
+    fun clearToken(context: Context) {
+        // clear in-memory cache
+        inMemoryToken = null
+        // clear from SharedPreferences
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .remove(KEY_TOKEN)
+            .commit()
+    }
 }

@@ -35,6 +35,12 @@ class TrackingService : Service() {
         super.onCreate()
         try {
             android.util.Log.i("TrackingService", "===== TrackingService.onCreate() START =====")
+            
+            // CRITICAL: Call startForeground FIRST, before any other operations
+            // On Android 12+, if startForeground is not called within 5 seconds, the app crashes
+            startForegroundServiceNotification()
+            android.util.Log.i("TrackingService", "✓ Foreground notification started FIRST")
+            
             fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
             android.util.Log.i("TrackingService", "✓ FusedLocationProviderClient initialized")
             
@@ -44,6 +50,7 @@ class TrackingService : Service() {
                     android.util.Log.i("TrackingService", "Got ${result.locations.size} location update(s)")
                     result.locations.forEach { location -> 
                         android.util.Log.d("TrackingService", "Location received: lat=${location.latitude}, lng=${location.longitude}")
+                        LiveLogManager.log("🔄", "GPS: ${location.latitude}, ${location.longitude} (acc: ${location.accuracy.toInt()}m)")
                         processLocation(location) 
                     }
                 }
@@ -51,14 +58,11 @@ class TrackingService : Service() {
             android.util.Log.i("TrackingService", "✓ LocationCallback initialized")
 
             if (!hasRequiredLocationPermissions()) {
-                android.util.Log.e("TrackingService", "Cannot start foreground service: required location permissions are missing")
-                LogPersistor.append(this, "TrackingService", "Cannot start foreground service: required location permissions are missing")
-                stopSelf()
+                android.util.Log.e("TrackingService", "Cannot start location updates: required location permissions are missing")
+                LogPersistor.append(this, "TrackingService", "Cannot start location updates: required location permissions are missing")
+                warnBackgroundPermissionMissing()
                 return
             }
-
-            startForegroundServiceNotification()
-            android.util.Log.i("TrackingService", "✓ Foreground notification started")
 
             startLocationUpdates()
             android.util.Log.i("TrackingService", "✓ Location updates requested")
@@ -66,7 +70,6 @@ class TrackingService : Service() {
         } catch (e: Exception) {
             android.util.Log.e("TrackingService", "❌ CRITICAL ERROR in onCreate(): ${e.message}", e)
             e.printStackTrace()
-            stopSelf()
         }
     }
 

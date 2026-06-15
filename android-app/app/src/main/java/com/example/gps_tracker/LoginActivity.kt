@@ -157,6 +157,12 @@ class LoginActivity : AppCompatActivity() {
         errorText.visibility = View.GONE
         loginButton.isEnabled = false
         loginButton.text = "Tracking Enabled"
+        
+        // Navigate to MainActivity after successful login and service start
+        val mainIntent = Intent(this, MainActivity::class.java)
+        mainIntent.flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK
+        startActivity(mainIntent)
+        finish()
     }
 
     override fun onRequestPermissionsResult(

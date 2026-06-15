@@ -135,4 +135,29 @@ class ApiService {
         .map((item) => LocationPoint.fromJson(item))
         .toList();
   }
+
+  static Future<List<LocationPoint>> getLocationHistory(String token, int userId, {String? date}) async {
+    final queryDate = date ?? DateTime.now().toIso8601String().split('T')[0];
+    final uri = buildUri('/locations/history/$userId?date=$queryDate');
+    print('ApiService.getLocationHistory calling $uri');
+    final response = await http.get(
+      uri,
+      headers: {'Authorization': 'Bearer ' + token},
+    );
+    print('ApiService.getLocationHistory status=${response.statusCode} body=${response.body}');
+
+    final body = response.body.isNotEmpty
+        ? jsonDecode(response.body) as Map<String, dynamic>
+        : <String, dynamic>{};
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception(body['error'] ?? 'Failed to load location history');
+    }
+
+    final history = (body['history'] as List?) ?? <dynamic>[];
+    print('ApiService.getLocationHistory parsed history count=${history.length}');
+    return history
+        .map((item) => LocationPoint.fromJson(item))
+        .toList();
+  }
 }
