@@ -33,6 +33,12 @@ class LoginActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_login)
+        
+        // Initialize device compatibility and diagnostics
+        android.util.Log.i("LoginActivity", "===== App Startup =====")
+        DeviceCompat.logDeviceInfo(this)
+        DeviceCompat.applyDeviceSpecificFixes(this)
+        NetworkDiagnostics.logNetworkDiagnostics(this)
 
         emailInput = findViewById(R.id.emailInput)
         passwordInput = findViewById(R.id.passwordInput)

@@ -31,14 +31,17 @@ class MainActivity : AppCompatActivity() {
     private var locationListener: LocationListener? = null
     private var updateTimer: Timer? = null
 
+    private val logUpdateCallback = {
+        runOnUiThread { refreshLogPanel() }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        // Initialize LiveLogManager UI callback
-        LiveLogManager.onLogAdded = {
-            runOnUiThread { refreshLogPanel() }
-        }
+        // Register the log listener before showing existing logs.
+        LiveLogManager.addLogListener(logUpdateCallback)
+        refreshLogPanel()
 
         // Start Tracking Button
         findViewById<MaterialButton>(R.id.startTrackingButton).setOnClickListener {
@@ -113,9 +116,15 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        refreshLogPanel()
+    }
+
     override fun onDestroy() {
-        super.onDestroy()
+        LiveLogManager.removeLogListener(logUpdateCallback)
         updateTimer?.cancel()
+        super.onDestroy()
     }
 
     private fun showLogoutDialog() {

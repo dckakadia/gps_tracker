@@ -5,10 +5,30 @@ import java.util.*
 
 object LiveLogManager {
     private val _logs = mutableListOf<String>()
-    val logs: List<String> get() = _logs.toList()
-    var onLogAdded: (() -> Unit)? = null
+    private val listeners = mutableSetOf<() -> Unit>()
+    val logs: List<String>
+        get() = synchronized(_logs) {
+            _logs.toList()
+        }
     var successCount = 0
     var totalCount = 0
+
+    @Synchronized
+    fun addLogListener(listener: () -> Unit) {
+        listeners.add(listener)
+    }
+
+    @Synchronized
+    fun removeLogListener(listener: () -> Unit) {
+        listeners.remove(listener)
+    }
+
+    private fun notifyListeners() {
+        val snapshot = synchronized(listeners) {
+            listeners.toList()
+        }
+        snapshot.forEach { it() }
+    }
 
     fun log(emoji: String, message: String) {
         val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
@@ -17,13 +37,15 @@ object LiveLogManager {
             _logs.add(0, entry)
             if (_logs.size > 20) _logs.removeAt(_logs.size - 1)
         }
-        onLogAdded?.invoke()
+        notifyListeners()
     }
 
     fun clear() {
-        _logs.clear()
+        synchronized(_logs) {
+            _logs.clear()
+        }
         successCount = 0
         totalCount = 0
-        onLogAdded?.invoke()
+        notifyListeners()
     }
 }
