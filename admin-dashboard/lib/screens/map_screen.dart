@@ -642,10 +642,25 @@ class _MapScreenState extends State<MapScreen> {
                           final isSelected = _selectedLocation?.userId == location.userId;
                           final distKm = _userDistances[location.userId];
                           final battery = location.batteryLevel;
-                          final batteryColor = (battery != null && battery < 20) ? Colors.red : Colors.green;
+                          final batteryColor = battery == null
+                              ? Colors.grey
+                              : battery < 20
+                                  ? Colors.red
+                                  : battery < 50
+                                      ? Colors.orange
+                                      : Colors.green;
+                          final batteryIcon = battery == null
+                              ? Icons.battery_unknown
+                              : battery > 80
+                                  ? Icons.battery_full
+                                  : battery > 50
+                                      ? Icons.battery_5_bar
+                                      : battery > 20
+                                          ? Icons.battery_3_bar
+                                          : Icons.battery_alert;
                           return Marker(
                             width: 190,
-                            height: 145,
+                            height: 160,
                             point: LatLng(location.latitude, location.longitude),
                             builder: (_) => Column(
                               children: [
@@ -653,14 +668,16 @@ class _MapScreenState extends State<MapScreen> {
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
                                     Icon(Icons.location_pin, color: markerColor, size: 36),
+                                    Icon(batteryIcon, color: batteryColor, size: 20),
                                     if (battery != null)
-                                      Icon(
-                                        battery > 80 ? Icons.battery_full :
-                                        battery > 50 ? Icons.battery_5_bar :
-                                        battery > 20 ? Icons.battery_3_bar :
-                                        Icons.battery_alert,
-                                        color: batteryColor,
-                                        size: 16,
+                                      Text(
+                                        '$battery%',
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.bold,
+                                          color: batteryColor,
+                                          shadows: [Shadow(color: Colors.white, blurRadius: 3)],
+                                        ),
                                       ),
                                   ],
                                 ),
@@ -703,6 +720,20 @@ class _MapScreenState extends State<MapScreen> {
                                           fontSize: 10,
                                           color: isSelected ? Colors.white70 : Colors.black54,
                                         ),
+                                      ),
+                                      Row(
+                                        children: [
+                                          Icon(batteryIcon, size: 13, color: isSelected ? Colors.white70 : batteryColor),
+                                          SizedBox(width: 2),
+                                          Text(
+                                            battery != null ? '$battery%' : 'No data',
+                                            style: TextStyle(
+                                              fontSize: 10,
+                                              color: isSelected ? Colors.white70 : batteryColor,
+                                              fontWeight: battery != null && battery < 20 ? FontWeight.bold : FontWeight.normal,
+                                            ),
+                                          ),
+                                        ],
                                       ),
                                       if (distKm != null)
                                         Text(
