@@ -11,39 +11,13 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
-import javax.net.ssl.SSLContext
-import javax.net.ssl.TrustManager
-import javax.net.ssl.X509TrustManager
-import java.security.cert.X509Certificate
-import java.security.SecureRandom
 
 object ApiClient {
     private const val BASE_URL = "http://116.74.77.22:8095/api"
     private var authToken: String? = null
-    
-    // Create permissive trust manager to accept all certificates
-    private fun createPermissiveTrustManager(): X509TrustManager {
-        return object : X509TrustManager {
-            override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) {}
-            override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {}
-            override fun getAcceptedIssuers(): Array<X509Certificate>? = arrayOf()
-        }
-    }
-    
+
     private val client = OkHttpClient.Builder()
         .callTimeout(java.time.Duration.ofSeconds(20))
-        .also { builder ->
-            try {
-                val trustManager = createPermissiveTrustManager()
-                val sslContext = SSLContext.getInstance("TLS").apply {
-                    init(null, arrayOf<TrustManager>(trustManager), SecureRandom())
-                }
-                builder.sslSocketFactory(sslContext.socketFactory, trustManager)
-                builder.hostnameVerifier { _, _ -> true }
-            } catch (e: Exception) {
-                android.util.Log.e("ApiClient", "SSL configuration error", e)
-            }
-        }
         .build()
 
     private val moshi = Moshi.Builder().build()
@@ -75,21 +49,112 @@ object ApiClient {
                 client.newCall(request).execute().use { response ->
                     val responseBody = response.body?.string()
                     if (!response.isSuccessful || responseBody == null) {
-                        return@withContext LoginResult(false, null, "Invalid credentials or network error")
+                        return@withContext LoginResult(false, null, null, "Invalid credentials or network error")
                     }
                     val parsed = mapAdapter.fromJson(responseBody)
                     val token = parsed?.get("token") as? String
+                    val refreshToken = parsed?.get("refreshToken") as? String
                     val error = parsed?.get("error") as? String
                     return@withContext if (token != null) {
-                        LoginResult(true, token, null)
+                        LoginResult(true, token, refreshToken, null)
                     } else {
-                        LoginResult(false, null, error ?: "Login failed")
+                        LoginResult(false, null, null, error ?: "Login failed")
                     }
                 }
             } catch (err: Exception) {
                 android.util.Log.e("ApiClient", "Login exception", err)
                 err.printStackTrace()
-                return@withContext LoginResult(false, null, err.message ?: "Network error")
+                return@withContext LoginResult(false, null, null, err.message ?: "Network error")
+            }
+        }
+    }
+
+    private fun isTokenExpiringSoon(token: String, withinSeconds: Long = 300): Boolean {
+        try {
+            val parts = token.split('.')
+            if (parts.size < 2) return true
+            val payload = parts[1]
+            val decoded = java.util.Base64.getUrlDecoder().decode(payload)
+            val map = mapAdapter.fromJson(String(decoded))
+            val exp = (map?.get("exp") as? Double)?.toLong() ?: (map?.get("exp") as? Long)
+            exp?.let {
+                val nowSec = System.currentTimeMillis() / 1000
+                return (it - nowSec) <= withinSeconds
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("ApiClient", "Failed to parse token expiry: ${e.message}", e)
+        }
+        return true
+    }
+
+    private fun notifySessionExpired(context: Context) {
+        val channelId = "gps_tracker_auth_channel"
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            val channel = android.app.NotificationChannel(channelId, "GPS Tracker Auth Alerts", android.app.NotificationManager.IMPORTANCE_HIGH)
+            channel.description = "Notifications when auth token is missing or expired"
+            val manager = context.getSystemService(android.app.NotificationManager::class.java)
+            manager?.createNotificationChannel(channel)
+        }
+        val notification = androidx.core.app.NotificationCompat.Builder(context, channelId)
+            .setContentTitle("Session expired, please login again.")
+            .setContentText("Tap to open app and re-login")
+            .setSmallIcon(android.R.drawable.ic_dialog_alert)
+            .setPriority(androidx.core.app.NotificationCompat.PRIORITY_HIGH)
+            .build()
+        val manager = context.getSystemService(android.app.NotificationManager::class.java)
+        manager?.notify(9999, notification)
+    }
+
+    private suspend fun ensureFreshToken(context: Context): Boolean {
+        return withContext(Dispatchers.IO) {
+            try {
+                val token = authToken ?: AuthManager.getToken(context)
+                if (token == null) return@withContext false
+                if (!isTokenExpiringSoon(token, 300)) return@withContext true
+
+                // Attempt refresh
+                val refreshToken = AuthManager.getRefreshToken(context)
+                if (refreshToken == null) {
+                    AuthManager.clearToken(context)
+                    clearToken()
+                    notifySessionExpired(context)
+                    return@withContext false
+                }
+
+                val bodyJson = mapAdapter.toJson(mapOf("refreshToken" to refreshToken))
+                val request = Request.Builder()
+                    .url("$BASE_URL/auth/refresh")
+                    .post(bodyJson.toRequestBody("application/json; charset=utf-8".toMediaType()))
+                    .build()
+
+                client.newCall(request).execute().use { response ->
+                    val responseBody = response.body?.string()
+                    if (!response.isSuccessful || responseBody == null) {
+                        AuthManager.clearToken(context)
+                        clearToken()
+                        notifySessionExpired(context)
+                        return@withContext false
+                    }
+                    val parsed = mapAdapter.fromJson(responseBody)
+                    val newToken = parsed?.get("token") as? String
+                    if (newToken != null) {
+                        AuthManager.saveToken(context, newToken)
+                        setToken(newToken)
+                        android.util.Log.i("ApiClient", "Token refreshed successfully")
+                        return@withContext true
+                    } else {
+                        AuthManager.clearToken(context)
+                        clearToken()
+                        notifySessionExpired(context)
+                        return@withContext false
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("ApiClient", "Token refresh failed: ${e.message}", e)
+                AuthManager.clearToken(context)
+                clearToken()
+                notifySessionExpired(context)
+                return@withContext false
             }
         }
     }
@@ -97,6 +162,14 @@ object ApiClient {
     suspend fun uploadLocations(context: Context, points: List<LocationEntity>): Boolean {
         return withContext(Dispatchers.IO) {
             try {
+                // Ensure token is fresh/valid before attempting upload
+                if (!ensureFreshToken(context)) {
+                    android.util.Log.e("ApiClient", "UPLOAD BLOCKED — No valid auth token. User must log in.")
+                    LogPersistor.append(context, "ApiClient", "UPLOAD BLOCKED — No valid auth token. User must log in.")
+                    LiveLogManager.log("⚠️", "Token missing/expired — skipped")
+                    return@withContext false
+                }
+
                 if (authToken == null) {
                     android.util.Log.e("ApiClient", "UPLOAD BLOCKED — No auth token. User must log in.")
                     LogPersistor.append(context, "ApiClient", "UPLOAD BLOCKED — No auth token. User must log in.")
@@ -184,5 +257,5 @@ object ApiClient {
         }
     }
 
-    data class LoginResult(val success: Boolean, val token: String?, val error: String?)
+    data class LoginResult(val success: Boolean, val token: String?, val refreshToken: String?, val error: String?)
 }

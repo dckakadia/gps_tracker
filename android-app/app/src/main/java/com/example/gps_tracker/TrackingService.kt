@@ -11,7 +11,9 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.location.Location
 import android.os.Build
+import android.os.HandlerThread
 import android.os.IBinder
+import android.os.Looper
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import androidx.work.Constraints
@@ -33,6 +35,7 @@ class TrackingService : Service() {
 
     private lateinit var fusedLocationClient: FusedLocationProviderClient
     private lateinit var locationCallback: LocationCallback
+    private lateinit var locationHandlerThread: HandlerThread
 
     override fun onCreate() {
         super.onCreate()
@@ -138,7 +141,8 @@ class TrackingService : Service() {
         }
 
         try {
-            fusedLocationClient.requestLocationUpdates(request, locationCallback, mainLooper)
+            locationHandlerThread = HandlerThread("LocationHandlerThread").also { it.start() }
+            fusedLocationClient.requestLocationUpdates(request, locationCallback, locationHandlerThread.looper)
             android.util.Log.i("TrackingService", "Location updates requested successfully")
         } catch (e: Exception) {
             android.util.Log.e("TrackingService", "Error requesting location updates", e)
@@ -251,6 +255,9 @@ class TrackingService : Service() {
             }
         } catch (e: Exception) {
             android.util.Log.e("TrackingService", "Error removing location updates: ${e.message}", e)
+        }
+        if (::locationHandlerThread.isInitialized) {
+            locationHandlerThread.quitSafely()
         }
         super.onDestroy()
     }

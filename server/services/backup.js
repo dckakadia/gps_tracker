@@ -2,10 +2,6 @@ import { spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import util from 'util';
-import { exec } from 'child_process';
-
-const execPromise = util.promisify(exec);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -161,9 +157,17 @@ async function performBackup(io) {
       throw new Error('DATABASE_URL not set');
     }
 
-    // Use pg_dump to dump the database
-    const pgDumpCmd = `pg_dump "${databaseUrl}" > "${dbDumpFile}"`;
-    await execPromise(pgDumpCmd, { maxBuffer: 10 * 1024 * 1024 });
+    // Use pg_dump with spawn to avoid shell injection
+    await new Promise((resolve, reject) => {
+      const proc = spawn('pg_dump', ['--file', dbDumpFile, databaseUrl], { stdio: ['ignore', 'ignore', 'pipe'] });
+      let stderr = '';
+      proc.stderr.on('data', (d) => { stderr += d.toString(); });
+      proc.on('close', (code) => {
+        if (code === 0) resolve();
+        else reject(new Error(`pg_dump failed (code ${code}): ${stderr.slice(0, 500)}`));
+      });
+      proc.on('error', (e) => reject(new Error(`Failed to start pg_dump: ${e.message}`)));
+    });
     emit('Database dumped', { overallPct: 5, stageLabel: 'Stage 1 / 3' });
 
     // Stage 2: Upload database dump to Google Drive

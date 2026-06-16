@@ -74,6 +74,26 @@ class MainActivity : AppCompatActivity() {
 
         // Initialize with mock data for demonstration
         initializeMockData()
+
+        // Auto-start tracking if permissions already granted
+        val requiredPermissions = mutableListOf(
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.ACCESS_COARSE_LOCATION
+        )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            requiredPermissions.add(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+        }
+
+        val missingPermissions = requiredPermissions.filter {
+            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+        }
+
+        if (missingPermissions.isEmpty()) {
+            android.util.Log.i("MainActivity", "Permissions already granted — auto-starting TrackingService")
+            startTrackingService()
+        } else {
+            android.util.Log.i("MainActivity", "Permissions missing on startup: $missingPermissions — not auto-starting service")
+        }
     }
 
     private fun initializeMockData() {

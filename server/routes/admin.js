@@ -50,6 +50,13 @@ router.put('/users/:id', async (req, res) => {
     const updates = [];
     const params = [];
 
+    if (email) {
+      const conflict = await query('SELECT id FROM users WHERE email = $1 AND id != $2', [email, id]);
+      if (conflict.rowCount > 0) {
+        return res.status(409).json({ error: 'Email already in use by another user' });
+      }
+    }
+
     if (name) {
       params.push(name);
       updates.push(`name = $${params.length}`);
@@ -92,6 +99,9 @@ router.put('/users/:id', async (req, res) => {
 router.delete('/users/:id', async (req, res) => {
   try {
     const { id } = req.params;
+    if (String(req.user.id) === String(id)) {
+      return res.status(400).json({ error: 'You cannot delete your own account' });
+    }
     const result = await query('DELETE FROM users WHERE id = $1 RETURNING id', [id]);
     if (result.rowCount === 0) {
       return res.status(404).json({ error: 'User not found' });

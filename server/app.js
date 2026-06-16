@@ -7,11 +7,15 @@ import { Server as SocketIOServer } from 'socket.io';
 import cron from 'node-cron';
 import authRoutes from './routes/auth.js';
 import adminRoutes from './routes/admin.js';
+import usersRoutes from './routes/users.js';
 import locationRoutes from './routes/locations.js';
 import backupRoutes from './routes/backup.js';
 import { performBackup } from './services/backup.js';
 import { initializeUsername } from './db/init-username.js';
 import { initializeUploadAudit } from './db/init-upload-audit.js';
+import { initializeLocationsIndex } from './db/init-locations-index.js';
+import { initializeAdminUser } from './db/init-admin-user.js';
+import { initializeDatabase } from './db/index.js';
 import pool from './db/index.js';
 
 dotenv.config();
@@ -36,6 +40,7 @@ app.use(express.urlencoded({ extended: false }));
 
 app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/users', usersRoutes);
 app.use('/api/locations', locationRoutes);
 app.use('/api/backup', backupRoutes);
 
@@ -77,6 +82,18 @@ if (process.env.ENABLE_AUTO_BACKUP === 'true') {
 
 const startServer = async () => {
   try {
+    await initializeDatabase();
+  } catch (err) {
+    console.error('Failed to initialize database schema:', err.message);
+  }
+
+  try {
+    await initializeAdminUser();
+  } catch (err) {
+    console.error('Failed to initialize admin user:', err.message);
+  }
+
+  try {
     await initializeUsername();
   } catch (err) {
     console.error('Failed to initialize username:', err.message);
@@ -86,6 +103,12 @@ const startServer = async () => {
     await initializeUploadAudit();
   } catch (err) {
     console.error('Failed to initialize upload audit table:', err.message);
+  }
+
+  try {
+    await initializeLocationsIndex();
+  } catch (err) {
+    console.error('Failed to initialize locations index:', err.message);
   }
 
   httpServer.listen(port, () => {

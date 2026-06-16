@@ -4,8 +4,9 @@ import '../models/user.dart';
 import '../models/location_point.dart';
 
 class ApiService {
-  static const String baseUrl = 'http://116.74.77.22:8095/api';
-  // The server is exposed on port 8095 for the Flutter web/dashboard deployment.
+  // Production: served via nginx, so /api resolves to the same origin.
+  // Local dev: flutter run --dart-define=API_URL=http://localhost:4000/api
+  static const String baseUrl = String.fromEnvironment('API_URL', defaultValue: '/api');
 
   static Uri buildUri(String path) => Uri.parse('$baseUrl$path');
 
@@ -159,5 +160,21 @@ class ApiService {
     return history
         .map((item) => LocationPoint.fromJson(item))
         .toList();
+  }
+
+  static Future<List<Map<String, dynamic>>> getUsersStatus(String token) async {
+    final uri = buildUri('/users/status');
+    print('ApiService.getUsersStatus calling $uri');
+    final response = await http.get(
+      uri,
+      headers: {'Authorization': 'Bearer ' + token},
+    );
+    print('ApiService.getUsersStatus status=${response.statusCode} body=${response.body}');
+    final body = response.body.isNotEmpty ? jsonDecode(response.body) as Map<String, dynamic> : <String, dynamic>{};
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception(body['error'] ?? 'Failed to load user statuses');
+    }
+    final users = (body['users'] as List?) ?? <dynamic>[];
+    return users.map((u) => u as Map<String, dynamic>).toList();
   }
 }

@@ -1,6 +1,13 @@
 import { query } from './index.js';
 
+const useInMemoryDb = process.env.USE_IN_MEMORY_DB === 'true' || !process.env.DATABASE_URL;
+
 export async function initializeUploadAudit() {
+  if (useInMemoryDb) {
+    console.log('✓ Skipping upload audit creation in in-memory DB; schema is already loaded');
+    return;
+  }
+
   try {
     await query(
       `CREATE TABLE IF NOT EXISTS location_upload_audit (

@@ -122,6 +122,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
     final intervalMs = (1000 / _speedMultiplier).round();
     _replayTimer = Timer.periodic(Duration(milliseconds: intervalMs), (_) {
+      if (!mounted) return;
       setState(() {
         _replayIndex++;
         if (_replayIndex >= _points.length) {

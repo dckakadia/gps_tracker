@@ -110,6 +110,7 @@ class LoginActivity : AppCompatActivity() {
                 setLoading(false)
                 if (loginResult.success && loginResult.token != null) {
                     AuthManager.saveToken(this@LoginActivity, loginResult.token)
+                    loginResult.refreshToken?.let { rt -> AuthManager.saveRefreshToken(this@LoginActivity, rt) }
                     ApiClient.setToken(loginResult.token)
                     refreshTokenStatus()
                     startTrackingService()

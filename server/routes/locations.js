@@ -54,9 +54,17 @@ router.post('/', authorize, async (req, res) => {
         console.warn('Invalid location point skipped', { index, point });
         return;
       }
+      // Convert timestamp from milliseconds to ISO string for database insert
+      let recordedAtIso;
+      try {
+        recordedAtIso = new Date(recorded_at).toISOString();
+      } catch (e) {
+        console.warn('Invalid timestamp skipped', { index, recorded_at });
+        return;
+      }
       const idx = validPointsCount * 4;
-      placeholders.push(`($${idx + 1}, $${idx + 2}, $${idx + 3}, to_timestamp($${idx + 4}::double precision / 1000), NOW())`);
-      values.push(userId, latitude, longitude, recorded_at);
+      placeholders.push(`($${idx + 1}, $${idx + 2}, $${idx + 3}, $${idx + 4}, NOW())`);
+      values.push(userId, latitude, longitude, recordedAtIso);
       validPointsCount += 1;
     });
 
@@ -86,6 +94,34 @@ router.post('/', authorize, async (req, res) => {
     });
     console.log('Location points stored', { userId, count: validPointsCount });
 
+    // Broadcast the latest location for this user to connected clients via Socket.IO (if available)
+    try {
+      const io = req.app.get('io');
+      if (io) {
+        const latestRes = await query(
+          `SELECT u.id AS user_id, u.name, u.email, l.latitude, l.longitude, l.recorded_at, l.received_at,
+                  (l.recorded_at >= NOW() - INTERVAL '10 minutes') AS is_live
+           FROM users u, locations l
+           WHERE u.id = $1
+           AND l.user_id = u.id
+           ORDER BY l.recorded_at DESC
+           LIMIT 1`,
+          [userId]
+        );
+        if (latestRes && latestRes.rows && latestRes.rows[0]) {
+          const payload = latestRes.rows[0];
+          try {
+            io.emit('location:uploaded', payload);
+            console.info('Emitted location:uploaded event', { userId });
+          } catch (emitErr) {
+            console.error('Failed to emit socket event', emitErr);
+          }
+        }
+      }
+    } catch (emitQueryErr) {
+      console.error('Failed to query latest location for socket emit', emitQueryErr);
+    }
+
     return res.status(201).json({ message: 'Location points accepted' });
   } catch (err) {
     console.error('Upload locations error', err);
@@ -109,27 +145,23 @@ router.post('/', authorize, async (req, res) => {
 router.get('/latest', authorize, requireAdmin, async (req, res) => {
   const includeStale = req.query.include_stale === 'true';
   try {
-    const queryText = `SELECT u.id AS user_id,
-              u.name,
-              u.email,
-              l.latitude,
-              l.longitude,
-              l.recorded_at,
-              l.received_at,
-              (l.recorded_at >= NOW() - INTERVAL '10 minutes') AS is_live
-       FROM users u
-       JOIN LATERAL (
-         SELECT latitude, longitude, recorded_at, received_at
-         FROM locations
-         WHERE user_id = u.id
-         ${includeStale ? '' : "AND recorded_at >= NOW() - INTERVAL '10 minutes'"}
-         ORDER BY recorded_at DESC
-         LIMIT 1
-       ) l ON true
-       WHERE u.role != 'admin'
-       ORDER BY u.name`;
-
-    const result = await query(queryText);
+    const timeFilter = includeStale ? '' : "AND recorded_at >= NOW() - INTERVAL '10 minutes'";
+    const queryText = `
+      SELECT u.id AS user_id, u.name AS name, u.email AS email,
+             l.latitude, l.longitude, l.recorded_at, l.received_at,
+             (l.recorded_at >= NOW() - INTERVAL '10 minutes') AS is_live
+      FROM users u
+      INNER JOIN locations l ON l.user_id = u.id
+      INNER JOIN (
+        SELECT user_id, MAX(recorded_at) AS max_recorded_at
+        FROM locations
+        WHERE true ${timeFilter}
+        GROUP BY user_id
+      ) latest ON latest.user_id = l.user_id AND latest.max_recorded_at = l.recorded_at
+      WHERE u.role != $1
+      ORDER BY u.name
+    `;
+    const result = await query(queryText, ['admin']);
     console.info('Fetch latest locations', { includeStale, count: result.rows.length });
     return res.json({ locations: result.rows });
   } catch (err) {
@@ -140,8 +172,13 @@ router.get('/latest', authorize, requireAdmin, async (req, res) => {
 
 router.get('/history/:userId', authorize, requireAdmin, async (req, res) => {
   const userId = parseInt(req.params.userId, 10);
+  if (isNaN(userId)) {
+    return res.status(400).json({ error: 'Invalid user ID' });
+  }
   const date = req.query.date || new Date().toISOString().split('T')[0]; // Default to today
-  
+  const dayStart = new Date(date + 'T00:00:00.000Z');
+  const dayEnd = new Date(dayStart.getTime() + 86400000);
+
   try {
     const queryText = `SELECT id,
                               user_id,
@@ -151,10 +188,11 @@ router.get('/history/:userId', authorize, requireAdmin, async (req, res) => {
                               received_at
                        FROM locations
                        WHERE user_id = $1
-                       AND DATE(recorded_at) = $2
+                       AND recorded_at >= $2
+                       AND recorded_at < $3
                        ORDER BY recorded_at ASC`;
-    
-    const result = await query(queryText, [userId, date]);
+
+    const result = await query(queryText, [userId, dayStart.toISOString(), dayEnd.toISOString()]);
     console.info('Fetch location history', { userId, date, count: result.rows.length });
     return res.json({ history: result.rows });
   } catch (err) {

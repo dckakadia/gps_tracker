@@ -7,7 +7,9 @@ import { query } from '../db/index.js';
 dotenv.config();
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET;
+const REFRESH_SECRET = process.env.REFRESH_SECRET || JWT_SECRET;
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '8h';
+const REFRESH_EXPIRES_IN = process.env.REFRESH_EXPIRES_IN || '7d';
 
 router.post('/login', async (req, res) => {
   try {
@@ -35,10 +37,42 @@ router.post('/login', async (req, res) => {
       expiresIn: JWT_EXPIRES_IN,
     });
 
-    return res.json({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role } });
+    // Issue a refresh token (stateless) so clients can obtain a new access token
+    const refreshToken = jwt.sign({ id: user.id }, REFRESH_SECRET, { expiresIn: REFRESH_EXPIRES_IN });
+
+    return res.json({ token, refreshToken, user: { id: user.id, name: user.name, email: user.email, role: user.role } });
   } catch (err) {
     console.error('Login error:', err.message, err.stack);
-    return res.status(500).json({ error: 'Server error during login', details: err.message });
+    return res.status(500).json({ error: 'Server error during login' });
+  }
+});
+
+// Refresh access token using a refresh token
+router.post('/refresh', async (req, res) => {
+  try {
+    const { refreshToken } = req.body;
+    if (!refreshToken) return res.status(400).json({ error: 'refreshToken is required' });
+
+    let payload;
+    try {
+      payload = jwt.verify(refreshToken, REFRESH_SECRET);
+    } catch (err) {
+      return res.status(401).json({ error: 'Invalid refresh token' });
+    }
+
+    // Ensure the user still exists
+    const result = await query('SELECT id, name, email, role FROM users WHERE id = $1', [payload.id]);
+    const user = result.rows[0];
+    if (!user) return res.status(401).json({ error: 'Invalid refresh token (user not found)' });
+
+    const newToken = jwt.sign({ id: user.id, name: user.name, email: user.email, role: user.role }, JWT_SECRET, {
+      expiresIn: JWT_EXPIRES_IN,
+    });
+
+    return res.json({ token: newToken });
+  } catch (err) {
+    console.error('Refresh token error:', err.message, err.stack);
+    return res.status(500).json({ error: 'Server error during token refresh' });
   }
 });
 

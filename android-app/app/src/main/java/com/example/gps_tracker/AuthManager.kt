@@ -5,6 +5,7 @@ import android.content.Context
 object AuthManager {
     private const val PREFS_NAME = "gps_tracker_prefs"
     private const val KEY_TOKEN = "auth_token"
+    private const val KEY_REFRESH = "refresh_token"
 
     // In-memory cache to avoid read-after-write races when the service
     // starts immediately after login.
@@ -18,6 +19,13 @@ object AuthManager {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .edit()
             .putString(KEY_TOKEN, token)
+            .commit()
+    }
+
+    fun saveRefreshToken(context: Context, refreshToken: String) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_REFRESH, refreshToken)
             .commit()
     }
 
@@ -43,5 +51,15 @@ object AuthManager {
             .edit()
             .remove(KEY_TOKEN)
             .commit()
+        // also clear refresh token
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .remove(KEY_REFRESH)
+            .commit()
+    }
+
+    fun getRefreshToken(context: Context): String? {
+        return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getString(KEY_REFRESH, null)
     }
 }

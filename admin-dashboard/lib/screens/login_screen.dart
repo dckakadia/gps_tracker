@@ -23,7 +23,8 @@ class _LoginScreenState extends State<LoginScreen> {
     });
 
     try {
-      final response = await ApiService.login(_identifierController.text.trim(), _passwordController.text.trim());
+      final response = await ApiService.login(
+          _identifierController.text.trim(), _passwordController.text.trim());
       if (response.containsKey('token')) {
         final user = response['user'];
         if (user is Map<String, dynamic> && user['role'] != 'admin') {
@@ -34,9 +35,11 @@ class _LoginScreenState extends State<LoginScreen> {
         }
 
         AuthState.token = response['token'];
-        Navigator.of(context).pushReplacement(MaterialPageRoute(
-          builder: (_) => DashboardScreen(token: response['token']),
-        ));
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(
+            builder: (_) => DashboardScreen(token: response['token']),
+          ),
+        );
       } else {
         setState(() {
           final statusCode = response['statusCode'];
@@ -45,7 +48,9 @@ class _LoginScreenState extends State<LoginScreen> {
           _error = statusCode != null
               ? '$errorMessage (status: $statusCode)'
               : errorMessage;
-          if (backendBody != null && backendBody is Map<String, dynamic> && backendBody.isNotEmpty) {
+          if (backendBody != null &&
+              backendBody is Map<String, dynamic> &&
+              backendBody.isNotEmpty) {
             _error = '$_error\nResponse: ${jsonEncode(backendBody)}';
           }
         });
@@ -64,32 +69,100 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('Admin Login')),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            TextField(
-              controller: _identifierController,
-              decoration: InputDecoration(labelText: 'Email or User ID'),
+      backgroundColor: const Color(0xFFF0F4F8),
+      body: Center(
+        child: SingleChildScrollView(
+          child: Padding(
+            padding: const EdgeInsets.all(24.0),
+            child: Card(
+              elevation: 4,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 32.0, vertical: 40.0),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 400),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const Icon(Icons.location_on,
+                          size: 48, color: Colors.blue),
+                      const SizedBox(height: 12),
+                      Text(
+                        'GPS Tracker Admin',
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context)
+                            .textTheme
+                            .headlineSmall
+                            ?.copyWith(fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 32),
+                      TextField(
+                        controller: _identifierController,
+                        keyboardType: TextInputType.emailAddress,
+                        decoration: InputDecoration(
+                          labelText: 'Email or Username',
+                          prefixIcon: const Icon(Icons.person_outline),
+                          border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8)),
+                        ),
+                        onSubmitted: (_) => _login(),
+                      ),
+                      const SizedBox(height: 16),
+                      TextField(
+                        controller: _passwordController,
+                        obscureText: true,
+                        decoration: InputDecoration(
+                          labelText: 'Password',
+                          prefixIcon: const Icon(Icons.lock_outline),
+                          border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8)),
+                        ),
+                        onSubmitted: (_) => _login(),
+                      ),
+                      const SizedBox(height: 24),
+                      if (_error != null) ...[
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: Colors.red.shade50,
+                            border: Border.all(color: Colors.red.shade200),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            _error!,
+                            style: TextStyle(color: Colors.red.shade800),
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                      ],
+                      SizedBox(
+                        height: 48,
+                        child: ElevatedButton(
+                          onPressed: _loading ? null : _login,
+                          style: ElevatedButton.styleFrom(
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8)),
+                          ),
+                          child: _loading
+                              ? const SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(
+                                      color: Colors.white, strokeWidth: 2),
+                                )
+                              : const Text('Login',
+                                  style: TextStyle(fontSize: 16)),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
             ),
-            SizedBox(height: 16),
-            TextField(
-              controller: _passwordController,
-              decoration: InputDecoration(labelText: 'Password'),
-              obscureText: true,
-            ),
-            SizedBox(height: 24),
-            if (_error != null) ...[
-              Text(_error!, style: TextStyle(color: Colors.red)),
-              SizedBox(height: 12),
-            ],
-            ElevatedButton(
-              onPressed: _loading ? null : _login,
-              child: _loading ? CircularProgressIndicator(color: Colors.white) : Text('Login'),
-            ),
-          ],
+          ),
         ),
       ),
     );

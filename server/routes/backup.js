@@ -1,7 +1,10 @@
 import express from 'express';
 import { performBackup } from '../services/backup.js';
+import { authorize, requireAdmin } from '../middleware/auth.js';
 
 const router = express.Router();
+
+router.use(authorize, requireAdmin);
 
 // In-memory state tracker
 let backupState = {

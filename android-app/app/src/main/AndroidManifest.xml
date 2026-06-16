@@ -18,6 +18,7 @@
     
     <!-- Device wake/battery permissions for Motorola and other manufacturers -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     
     <!-- Motorola-specific battery/doze handling -->
     <uses-permission android:name="com.motorola.permission.MOTOROLA_MESSAGING_SERVICE" />
@@ -39,6 +40,16 @@
             android:name="com.example.gps_tracker.TrackingService"
             android:foregroundServiceType="location"
             android:exported="false" />
+
+        <receiver
+            android:name="com.example.gps_tracker.BootReceiver"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
 
         <activity android:name="com.example.gps_tracker.LoginActivity"
             android:exported="true">

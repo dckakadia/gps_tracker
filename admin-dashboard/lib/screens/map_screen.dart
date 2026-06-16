@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:socket_io_client/socket_io_client.dart' as IO;
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -17,9 +18,9 @@ enum LocationFilterMode { all, liveOnly, staleOnly }
 
 class _MapScreenState extends State<MapScreen> {
   List<LocationPoint> locations = [];
-  late Timer _fetchTimer;
   late Timer _countdownTimer;
   late MapController _mapController;
+  IO.Socket? _socket;
   bool isLoading = true;
   String? errorMessage;
   LocationFilterMode _filterMode = LocationFilterMode.all;
@@ -35,15 +36,16 @@ class _MapScreenState extends State<MapScreen> {
     super.initState();
     _mapController = MapController();
     _fetchLocations();
-    _fetchTimer = Timer.periodic(Duration(seconds: 12), (_) {
-      if (!_isPaused) _fetchLocations();
-    });
+    _initSocket();
+    _loadInitialStatuses();
     _countdownTimer = Timer.periodic(Duration(seconds: 1), (_) {
+      if (!mounted) return;
       setState(() {
         if (!_isPaused) {
           _secondsUntilRefresh--;
           if (_secondsUntilRefresh <= 0) {
             _secondsUntilRefresh = 12;
+            _fetchLocations();
           }
         }
       });
@@ -52,7 +54,8 @@ class _MapScreenState extends State<MapScreen> {
 
   @override
   void dispose() {
-    _fetchTimer.cancel();
+    _socket?.disconnect();
+    _socket?.destroy();
     _countdownTimer.cancel();
     _mapController.dispose();
     super.dispose();
@@ -88,6 +91,81 @@ class _MapScreenState extends State<MapScreen> {
     }
   }
 
+  void _initSocket() {
+    try {
+      final uri = Uri.parse(ApiService.baseUrl.replaceFirst('/api', ''));
+      final url = '${uri.scheme}://${uri.host}:${uri.port}';
+      _socket = IO.io(url, <String, dynamic>{
+        'transports': ['websocket'],
+        'autoConnect': true,
+      });
+
+      _socket?.on('connect', (_) {
+        debugPrint('Socket connected');
+      });
+
+      _socket?.on('disconnect', (_) {
+        debugPrint('Socket disconnected');
+      });
+
+      _socket?.on('location:uploaded', (data) {
+        try {
+          debugPrint('Socket received location:uploaded: $data');
+          final updated = LocationPoint.fromJson(Map<String, dynamic>.from(data));
+          setState(() {
+            final idx = locations.indexWhere((l) => l.userId == updated.userId);
+            if (idx >= 0) {
+              locations[idx] = updated;
+            } else {
+              locations.add(updated);
+            }
+            _lastUpdated = DateTime.now();
+          });
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            _autoZoomToMarkers(_filteredLocations);
+          });
+        } catch (e, st) {
+          debugPrint('Error handling socket location update: $e');
+          debugPrint('$st');
+        }
+      });
+    } catch (e, st) {
+      debugPrint('Failed to init socket: $e');
+      debugPrint('$st');
+    }
+  }
+
+  Future<void> _loadInitialStatuses() async {
+    try {
+      final statuses = await ApiService.getUsersStatus(widget.token);
+      setState(() {
+        for (final s in statuses) {
+          final uid = s['user_id'] as int?;
+          if (uid == null) continue;
+          final idx = locations.indexWhere((l) => l.userId == uid);
+          if (idx >= 0) {
+            final updated = locations[idx];
+            final merged = LocationPoint(
+              userId: updated.userId,
+              name: updated.name,
+              latitude: updated.latitude,
+              longitude: updated.longitude,
+              recordedAt: updated.recordedAt,
+              receivedAt: updated.receivedAt,
+              isLive: updated.isLive,
+              lastSeen: s['last_seen'] as String?,
+              isOnline: s['is_online'] as bool?,
+            );
+            locations[idx] = merged;
+          }
+        }
+      });
+    } catch (e, st) {
+      debugPrint('Failed to load initial statuses: $e');
+      debugPrint('$st');
+    }
+  }
+
   Future<void> _fetchLocationHistory(LocationPoint location) async {
     try {
       final history = await ApiService.getLocationHistory(widget.token, location.userId);
@@ -106,7 +184,7 @@ class _MapScreenState extends State<MapScreen> {
 
   int _getMinutesSinceUpdate(LocationPoint location) {
     try {
-      final recordedTime = DateTime.parse(location.recordedAt);
+      final recordedTime = DateTime.parse(location.lastSeen ?? location.recordedAt);
       final now = DateTime.now();
       return now.difference(recordedTime).inMinutes;
     } catch (e) {
@@ -115,10 +193,9 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   Color _getPinColor(LocationPoint location) {
-    final minutesSince = _getMinutesSinceUpdate(location);
-    if (minutesSince < 15) return Colors.green;
-    if (minutesSince < 60) return Colors.orange;
-    return Colors.grey;
+    // Online if isOnline flag provided, otherwise fallback to 30 minute rule
+    final isOnline = location.isOnline ?? (_getMinutesSinceUpdate(location) < 30);
+    return isOnline ? Colors.green : Colors.grey;
   }
 
   String _getLastSeenText(LocationPoint location) {
@@ -129,6 +206,19 @@ class _MapScreenState extends State<MapScreen> {
     final hours = minutes ~/ 60;
     if (hours == 1) return '1 hour ago';
     return '$hours hours ago';
+  }
+
+  String _getStatusText(LocationPoint location) {
+    final isOnline = location.isOnline ?? (_getMinutesSinceUpdate(location) < 30);
+    if (isOnline) return 'Active';
+    try {
+      final last = DateTime.parse(location.lastSeen ?? location.recordedAt);
+      final hh = last.hour.toString().padLeft(2, '0');
+      final mm = last.minute.toString().padLeft(2, '0');
+      return 'Offline since $hh:$mm';
+    } catch (e) {
+      return 'Offline';
+    }
   }
 
   List<LocationPoint> get _filteredLocations {
@@ -181,7 +271,7 @@ class _MapScreenState extends State<MapScreen> {
       );
     }
 
-    if (filteredLocations.isEmpty && locations.isEmpty) {
+    if (filteredLocations.isEmpty) {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(16.0),
@@ -191,13 +281,15 @@ class _MapScreenState extends State<MapScreen> {
               Icon(Icons.location_off, size: 48, color: Colors.grey),
               SizedBox(height: 16),
               Text(
-                'No Users Available',
+                locations.isEmpty ? 'No Users Available' : 'No Users Match Filter',
                 style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                 textAlign: TextAlign.center,
               ),
               SizedBox(height: 8),
               Text(
-                'No users match the selected filter.\nTry switching to Live + Stale.',
+                locations.isEmpty
+                    ? 'No users have reported a location yet.'
+                    : 'No users match the selected filter.\nTry switching to Live + Stale.',
                 style: TextStyle(color: Colors.grey),
                 textAlign: TextAlign.center,
               ),
@@ -475,7 +567,7 @@ class _MapScreenState extends State<MapScreen> {
                                       ),
                                       SizedBox(height: 2),
                                       Text(
-                                        _getLastSeenText(location),
+                                        _getStatusText(location),
                                         style: TextStyle(
                                           fontSize: 10,
                                           color: isSelected ? Colors.white70 : Colors.black54,

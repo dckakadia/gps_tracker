@@ -7,6 +7,7 @@
   "scripts": {
     "start": "node app.js",
     "start:dev": "nodemon app.js",
+    "setup-db": "node db/run-migrations.js",
     "seed": "node seed.js"
   },
   "dependencies": {
@@ -18,6 +19,7 @@
     "jsonwebtoken": "^9.0.2",
     "node-cron": "^3.0.2",
     "pg": "^8.19.0",
+    "pg-mem": "^3.0.14",
     "socket.io": "^4.5.4"
   },
   "devDependencies": {
