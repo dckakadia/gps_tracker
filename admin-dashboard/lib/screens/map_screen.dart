@@ -1,10 +1,12 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import '../models/location_point.dart';
 import '../services/api_service.dart';
+import 'package:http/http.dart' as http;
 
 class MapScreen extends StatefulWidget {
   final String token;
@@ -30,6 +32,8 @@ class _MapScreenState extends State<MapScreen> {
   List<LocationPoint>? _locationHistory;
   bool _showingHistory = false;
   bool _isPaused = false;
+  Map<int, double> _userDistances = {};
+  List<Map<String, dynamic>> _geofences = [];
 
   @override
   void initState() {
@@ -38,6 +42,7 @@ class _MapScreenState extends State<MapScreen> {
     _fetchLocations();
     _initSocket();
     _loadInitialStatuses();
+    _fetchGeofences();
     _countdownTimer = Timer.periodic(Duration(seconds: 1), (_) {
       if (!mounted) return;
       setState(() {
@@ -77,6 +82,7 @@ class _MapScreenState extends State<MapScreen> {
         isLoading = false;
         _lastUpdated = DateTime.now();
       });
+      _fetchAllDistances();
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _autoZoomToMarkers(_filteredLocations);
       });
@@ -95,10 +101,10 @@ class _MapScreenState extends State<MapScreen> {
     try {
       final uri = Uri.parse(ApiService.baseUrl.replaceFirst('/api', ''));
       final url = '${uri.scheme}://${uri.host}:${uri.port}';
-      _socket = IO.io(url, <String, dynamic>{
-        'transports': ['websocket'],
-        'autoConnect': true,
-      });
+      _socket = IO.io(url, IO.OptionBuilder()
+          .setTransports(['websocket'])
+          .setAuth({'token': widget.token})
+          .build());
 
       _socket?.on('connect', (_) {
         debugPrint('Socket connected');
@@ -121,6 +127,7 @@ class _MapScreenState extends State<MapScreen> {
             }
             _lastUpdated = DateTime.now();
           });
+          _fetchDistanceForUser(updated.userId);
           WidgetsBinding.instance.addPostFrameCallback((_) {
             _autoZoomToMarkers(_filteredLocations);
           });
@@ -129,9 +136,106 @@ class _MapScreenState extends State<MapScreen> {
           debugPrint('$st');
         }
       });
+
+      _socket?.on('geofence:alert', (data) {
+        try {
+          final d = Map<String, dynamic>.from(data);
+          final event = d['event'] as String? ?? '';
+          final geofenceId = d['geofence_id'];
+          final gf = _geofences.firstWhere(
+            (g) => g['id'] == geofenceId,
+            orElse: () => {'name': 'Geofence'},
+          );
+          final gfName = gf['name'] ?? 'Geofence';
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Geofence alert: User ${event == 'entered' ? 'entered' : 'exited'} $gfName')),
+            );
+          }
+        } catch (e) {
+          debugPrint('Error handling geofence alert: $e');
+        }
+      });
     } catch (e, st) {
       debugPrint('Failed to init socket: $e');
       debugPrint('$st');
+    }
+  }
+
+  Future<void> _fetchGeofences() async {
+    try {
+      final uri = Uri.parse('${ApiService.baseUrl}/geofences');
+      final response = await http.get(uri, headers: {'Authorization': 'Bearer ${widget.token}'});
+      if (response.statusCode == 200) {
+        final body = jsonDecode(response.body) as Map<String, dynamic>;
+        setState(() {
+          _geofences = (body['geofences'] as List).map((g) => g as Map<String, dynamic>).toList();
+        });
+      }
+    } catch (e) {
+      debugPrint('Failed to fetch geofences: $e');
+    }
+  }
+
+  Future<void> _fetchDistanceForUser(int userId) async {
+    try {
+      final today = DateTime.now().toIso8601String().split('T')[0];
+      final uri = Uri.parse('${ApiService.baseUrl}/locations/stats/distance?user_id=$userId&date=$today');
+      final response = await http.get(uri, headers: {'Authorization': 'Bearer ${widget.token}'});
+      if (response.statusCode == 200) {
+        final body = jsonDecode(response.body) as Map<String, dynamic>;
+        final km = (body['distance_km'] as num?)?.toDouble() ?? 0.0;
+        setState(() {
+          _userDistances[userId] = km;
+        });
+      }
+    } catch (e) {
+      debugPrint('Failed to fetch distance for user $userId: $e');
+    }
+  }
+
+  Future<void> _fetchAllDistances() async {
+    for (final loc in locations) {
+      await _fetchDistanceForUser(loc.userId);
+    }
+  }
+
+  Future<void> _sendNotification(int userId, String userName) async {
+    final controller = TextEditingController();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Notify $userName'),
+        content: TextField(
+          controller: controller,
+          decoration: InputDecoration(hintText: 'Enter message'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text('Cancel')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text('Send'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || controller.text.isEmpty) return;
+    try {
+      final uri = Uri.parse('${ApiService.baseUrl}/users/notify');
+      final response = await http.post(
+        uri,
+        headers: {'Authorization': 'Bearer ${widget.token}', 'Content-Type': 'application/json'},
+        body: jsonEncode({'user_id': userId, 'message': controller.text}),
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(response.statusCode == 200 ? 'Notification sent' : 'Failed to send notification')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+      }
     }
   }
 
@@ -536,15 +640,32 @@ class _MapScreenState extends State<MapScreen> {
                         ...filteredLocations.map((location) {
                           final markerColor = _getPinColor(location);
                           final isSelected = _selectedLocation?.userId == location.userId;
+                          final distKm = _userDistances[location.userId];
+                          final battery = location.batteryLevel;
+                          final batteryColor = (battery != null && battery < 20) ? Colors.red : Colors.green;
                           return Marker(
-                            width: 180,
-                            height: 110,
+                            width: 190,
+                            height: 145,
                             point: LatLng(location.latitude, location.longitude),
                             builder: (_) => Column(
                               children: [
-                                Icon(Icons.location_pin, color: markerColor, size: 36),
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.location_pin, color: markerColor, size: 36),
+                                    if (battery != null)
+                                      Icon(
+                                        battery > 80 ? Icons.battery_full :
+                                        battery > 50 ? Icons.battery_5_bar :
+                                        battery > 20 ? Icons.battery_3_bar :
+                                        Icons.battery_alert,
+                                        color: batteryColor,
+                                        size: 16,
+                                      ),
+                                  ],
+                                ),
                                 Container(
-                                  width: 150,
+                                  width: 160,
                                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
                                   decoration: BoxDecoration(
                                     color: isSelected ? Colors.blue.withOpacity(0.95) : Colors.white.withOpacity(0.95),
@@ -557,13 +678,23 @@ class _MapScreenState extends State<MapScreen> {
                                   child: Column(
                                     crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
-                                      Text(
-                                        location.name,
-                                        style: TextStyle(
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.bold,
-                                          color: isSelected ? Colors.white : Colors.black,
-                                        ),
+                                      Row(
+                                        children: [
+                                          Expanded(
+                                            child: Text(
+                                              location.name,
+                                              style: TextStyle(
+                                                fontSize: 12,
+                                                fontWeight: FontWeight.bold,
+                                                color: (location.isOnline ?? false) ? (isSelected ? Colors.white : Colors.black) : (isSelected ? Colors.white70 : Colors.grey),
+                                              ),
+                                            ),
+                                          ),
+                                          GestureDetector(
+                                            onTap: () => _sendNotification(location.userId, location.name),
+                                            child: Icon(Icons.message, size: 14, color: isSelected ? Colors.white : Colors.blue),
+                                          ),
+                                        ],
                                       ),
                                       SizedBox(height: 2),
                                       Text(
@@ -573,6 +704,14 @@ class _MapScreenState extends State<MapScreen> {
                                           color: isSelected ? Colors.white70 : Colors.black54,
                                         ),
                                       ),
+                                      if (distKm != null)
+                                        Text(
+                                          '${distKm.toStringAsFixed(1)} km today',
+                                          style: TextStyle(
+                                            fontSize: 10,
+                                            color: isSelected ? Colors.white70 : Colors.black54,
+                                          ),
+                                        ),
                                       if (isSelected) ...[
                                         SizedBox(height: 4),
                                         GestureDetector(

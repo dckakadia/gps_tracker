@@ -178,11 +178,15 @@ object ApiClient {
                 }
 
                 val payload = points.map { point ->
-                    mapOf(
+                    val pointMap = mutableMapOf<String, Any>(
                         "latitude" to point.latitude,
                         "longitude" to point.longitude,
                         "recorded_at" to point.recordedAt
                     )
+                    if (point.batteryLevel >= 0) {
+                        pointMap["battery_level"] = point.batteryLevel
+                    }
+                    pointMap
                 }
 
                 val json = adapter.toJson(payload)
@@ -253,6 +257,27 @@ object ApiClient {
                 android.util.Log.e("ApiClient", "Upload exception", err)
                 LogPersistor.append(context, "ApiClient", "Upload exception: ${err.message}")
                 return@withContext false
+            }
+        }
+    }
+
+    suspend fun saveFcmToken(context: Context, fcmToken: String): Boolean {
+        return withContext(Dispatchers.IO) {
+            try {
+                if (!ensureFreshToken(context)) return@withContext false
+                val bodyJson = mapAdapter.toJson(mapOf("fcm_token" to fcmToken))
+                val request = Request.Builder()
+                    .url("$BASE_URL/users/fcm-token")
+                    .addHeader("Authorization", "Bearer ${authToken ?: ""}")
+                    .post(bodyJson.toRequestBody("application/json; charset=utf-8".toMediaType()))
+                    .build()
+                client.newCall(request).execute().use { response ->
+                    android.util.Log.i("ApiClient", "FCM token save: HTTP ${response.code}")
+                    response.isSuccessful
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("ApiClient", "saveFcmToken exception: ${e.message}", e)
+                false
             }
         }
     }

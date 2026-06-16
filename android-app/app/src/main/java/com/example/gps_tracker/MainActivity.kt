@@ -66,6 +66,11 @@ class MainActivity : AppCompatActivity() {
 
         updateAuthStatus()
 
+        // Register FCM token if logged in
+        if (AuthManager.hasToken(this)) {
+            FcmTokenManager.registerToken(this)
+        }
+
         // Initialize location manager
         locationManager = getSystemService(LOCATION_SERVICE) as LocationManager
 

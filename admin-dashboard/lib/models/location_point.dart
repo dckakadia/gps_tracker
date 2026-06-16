@@ -8,6 +8,7 @@ class LocationPoint {
   final bool isLive;
   final String? lastSeen;
   final bool? isOnline;
+  final int? batteryLevel;
 
   LocationPoint({
     required this.userId,
@@ -19,6 +20,7 @@ class LocationPoint {
     required this.isLive,
     this.lastSeen,
     this.isOnline,
+    this.batteryLevel,
   });
 
   factory LocationPoint.fromJson(Map<String, dynamic> json) {
@@ -32,6 +34,7 @@ class LocationPoint {
       isLive: json['is_live'] as bool? ?? false,
       lastSeen: json['last_seen'] as String? ?? json['received_at'] as String?,
       isOnline: json['is_online'] as bool? ?? null,
+      batteryLevel: json['battery_level'] as int?,
     );
   }
 }

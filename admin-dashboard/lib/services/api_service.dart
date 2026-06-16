@@ -177,4 +177,47 @@ class ApiService {
     final users = (body['users'] as List?) ?? <dynamic>[];
     return users.map((u) => u as Map<String, dynamic>).toList();
   }
+
+  static Future<List<Map<String, dynamic>>> getAttendance(String token, {String? date}) async {
+    final queryDate = date ?? DateTime.now().toIso8601String().split('T')[0];
+    final uri = buildUri('/admin/attendance?date=$queryDate');
+    print('ApiService.getAttendance calling $uri');
+    final response = await http.get(uri, headers: {'Authorization': 'Bearer ' + token});
+    print('ApiService.getAttendance status=${response.statusCode} body=${response.body}');
+    final body = response.body.isNotEmpty ? jsonDecode(response.body) as Map<String, dynamic> : <String, dynamic>{};
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception(body['error'] ?? 'Failed to load attendance');
+    }
+    final attendance = (body['attendance'] as List?) ?? <dynamic>[];
+    return attendance.map((a) => a as Map<String, dynamic>).toList();
+  }
+
+  static Future<Map<String, dynamic>> getDistance(String token, int userId, String date) async {
+    final uri = buildUri('/locations/stats/distance?user_id=$userId&date=$date');
+    print('ApiService.getDistance calling $uri');
+    final response = await http.get(uri, headers: {'Authorization': 'Bearer ' + token});
+    final body = response.body.isNotEmpty ? jsonDecode(response.body) as Map<String, dynamic> : <String, dynamic>{};
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception(body['error'] ?? 'Failed to get distance');
+    }
+    return body;
+  }
+
+  static Future<void> sendFcmToken(String token, String fcmToken) async {
+    final uri = buildUri('/users/fcm-token');
+    await http.post(
+      uri,
+      headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+      body: jsonEncode({'fcm_token': fcmToken}),
+    );
+  }
+
+  static Future<void> sendNotification(String token, int userId, String message) async {
+    final uri = buildUri('/users/notify');
+    await http.post(
+      uri,
+      headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
+      body: jsonEncode({'user_id': userId, 'message': message}),
+    );
+  }
 }

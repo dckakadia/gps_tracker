@@ -3,6 +3,8 @@ import 'map_screen.dart';
 import 'users_screen.dart';
 import 'backup_screen.dart';
 import 'history_screen.dart';
+import 'attendance_screen.dart';
+import 'geofence_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   final String token;
@@ -28,6 +30,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
       UsersScreen(token: widget.token),
       MapScreen(token: widget.token),
       HistoryScreen(token: widget.token),
+      AttendanceScreen(token: widget.token),
+      GeofenceScreen(token: widget.token),
       BackupScreen(token: widget.token),
     ];
 
@@ -98,6 +102,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             label: Text('History'),
                           ),
                           NavigationRailDestination(
+                            icon: Icon(Icons.today),
+                            label: Text('Attendance'),
+                          ),
+                          NavigationRailDestination(
+                            icon: Icon(Icons.fence),
+                            label: Text('Geofences'),
+                          ),
+                          NavigationRailDestination(
                             icon: Icon(Icons.backup),
                             label: Text('Backup'),
                           ),
@@ -111,6 +123,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           bottomNavigationBar: isWide
               ? null
               : BottomNavigationBar(
+                  type: BottomNavigationBarType.fixed,
                   currentIndex: _selectedIndex,
                   onTap: (index) {
                     setState(() {
@@ -121,6 +134,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     BottomNavigationBarItem(icon: Icon(Icons.people), label: 'Users'),
                     BottomNavigationBarItem(icon: Icon(Icons.map), label: 'Live Map'),
                     BottomNavigationBarItem(icon: Icon(Icons.history), label: 'History'),
+                    BottomNavigationBarItem(icon: Icon(Icons.today), label: 'Attendance'),
+                    BottomNavigationBarItem(icon: Icon(Icons.fence), label: 'Geofences'),
                     BottomNavigationBarItem(icon: Icon(Icons.backup), label: 'Backup'),
                   ],
                 ),

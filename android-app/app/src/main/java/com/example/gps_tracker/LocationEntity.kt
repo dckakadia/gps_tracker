@@ -9,5 +9,6 @@ data class LocationEntity(
     val latitude: Double,
     val longitude: Double,
     val recordedAt: Long,
-    val synced: Boolean = false
+    val synced: Boolean = false,
+    val batteryLevel: Int = -1
 )

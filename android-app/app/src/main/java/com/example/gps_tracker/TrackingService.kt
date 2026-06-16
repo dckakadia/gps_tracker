@@ -37,6 +37,12 @@ class TrackingService : Service() {
     private lateinit var locationCallback: LocationCallback
     private lateinit var locationHandlerThread: HandlerThread
 
+    // Batch upload state
+    private val pendingPoints = mutableListOf<LocationEntity>()
+    private var lastUploadTime = 0L
+    private val BATCH_SIZE = 10
+    private val BATCH_INTERVAL_MS = 2 * 60 * 1000L // 2 minutes
+
     override fun onCreate() {
         super.onCreate()
         try {
@@ -174,32 +180,43 @@ class TrackingService : Service() {
         }
     }
 
+    private fun getBatteryLevel(): Int {
+        return try {
+            val batteryManager = getSystemService(BATTERY_SERVICE) as android.os.BatteryManager
+            batteryManager.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY)
+        } catch (e: Exception) {
+            android.util.Log.w("TrackingService", "Failed to read battery level: ${e.message}")
+            -1
+        }
+    }
+
     private fun processLocation(location: Location) {
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 android.util.Log.d("TrackingService", ">>> processLocation() START")
+                val batteryLevel = getBatteryLevel()
                 val point = LocationEntity(
                     latitude = location.latitude,
                     longitude = location.longitude,
                     recordedAt = System.currentTimeMillis(),
+                    batteryLevel = batteryLevel,
                 )
-                android.util.Log.d("TrackingService", "Processing location: lat=${location.latitude}, lng=${location.longitude}")
-                
+                android.util.Log.d("TrackingService", "Processing location: lat=${location.latitude}, lng=${location.longitude}, battery=$batteryLevel%")
+                LiveLogManager.log("🔋", "Battery: $batteryLevel%")
+
                 val dao = AppDatabase.getInstance(this@TrackingService).locationDao()
                 android.util.Log.d("TrackingService", "✓ Database DAO initialized")
-                
+
                 val token = AuthManager.getToken(this@TrackingService)
                 android.util.Log.d("TrackingService", "Auth token: ${if (token != null) "present" else "MISSING"}")
                 token?.let { ApiClient.setToken(it) }
 
                 if (token == null) {
                     android.util.Log.w("TrackingService", "No auth token found. Storing location offline.")
-                    android.util.Log.d("TrackingService", "Offline point details: lat=${point.latitude}, lng=${point.longitude}, recordedAt=${point.recordedAt}")
                     showAuthMissingNotification()
-                    LogPersistor.append(this@TrackingService, "TrackingService", "No auth token; storing offline point: lat=${point.latitude}, lng=${point.longitude}, recordedAt=${point.recordedAt}")
+                    LogPersistor.append(this@TrackingService, "TrackingService", "No auth token; storing offline point: lat=${point.latitude}, lng=${point.longitude}")
                     dao.insert(point)
                     scheduleSyncJob()
-                    LogPersistor.append(this@TrackingService, "TrackingService", "Offline point persisted to DB and sync job scheduled")
                     return@launch
                 }
 
@@ -210,18 +227,39 @@ class TrackingService : Service() {
                     return@launch
                 }
 
-                android.util.Log.d("TrackingService", "Attempting to upload location... payload: lat=${point.latitude}, lng=${point.longitude}, recordedAt=${point.recordedAt}")
-                LogPersistor.append(this@TrackingService, "TrackingService", "Attempting upload for point: lat=${point.latitude}, lng=${point.longitude}, recordedAt=${point.recordedAt}")
-                val success = ApiClient.uploadLocations(this@TrackingService, listOf(point))
-                if (success) {
-                    android.util.Log.i("TrackingService", "✓ Location uploaded successfully: lat=${point.latitude}, lng=${point.longitude}")
-                    LogPersistor.append(this@TrackingService, "TrackingService", "Upload succeeded for point: lat=${point.latitude}, lng=${point.longitude}")
-                } else {
-                    android.util.Log.w("TrackingService", "❌ Upload failed. Storing location offline.")
-                    LogPersistor.append(this@TrackingService, "TrackingService", "Upload failed; persisting offline point: lat=${point.latitude}, lng=${point.longitude}")
-                    dao.insert(point)
-                    scheduleSyncJob()
+                // Batch accumulation
+                synchronized(pendingPoints) {
+                    pendingPoints.add(point)
                 }
+
+                val now = System.currentTimeMillis()
+                val shouldUpload = synchronized(pendingPoints) {
+                    pendingPoints.size >= BATCH_SIZE || (now - lastUploadTime) >= BATCH_INTERVAL_MS
+                }
+
+                if (shouldUpload) {
+                    val batch = synchronized(pendingPoints) {
+                        val copy = pendingPoints.toList()
+                        pendingPoints.clear()
+                        copy
+                    }
+                    if (batch.isNotEmpty()) {
+                        android.util.Log.d("TrackingService", "Uploading batch of ${batch.size} points")
+                        LogPersistor.append(this@TrackingService, "TrackingService", "Uploading batch of ${batch.size} points")
+                        val success = ApiClient.uploadLocations(this@TrackingService, batch)
+                        lastUploadTime = now
+                        if (success) {
+                            android.util.Log.i("TrackingService", "✓ Batch uploaded: ${batch.size} points")
+                            LogPersistor.append(this@TrackingService, "TrackingService", "Batch upload succeeded: ${batch.size} points")
+                        } else {
+                            android.util.Log.w("TrackingService", "❌ Batch upload failed. Storing offline.")
+                            LogPersistor.append(this@TrackingService, "TrackingService", "Batch upload failed; persisting offline")
+                            for (p in batch) dao.insert(p)
+                            scheduleSyncJob()
+                        }
+                    }
+                }
+
                 android.util.Log.d("TrackingService", "<<< processLocation() END")
             } catch (e: SecurityException) {
                 android.util.Log.e("TrackingService", "❌ SECURITY EXCEPTION: Location permission denied? ${e.message}", e)
