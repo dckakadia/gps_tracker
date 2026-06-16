@@ -1,4 +1,0 @@
-CREATE USER dckakadia WITH PASSWORD 'Devin@404404';
-CREATE DATABASE gps_tracker OWNER dckakadia;
-GRANT ALL PRIVILEGES ON DATABASE gps_tracker TO dckakadia;
-ALTER ROLE dckakadia CREATEDB;
