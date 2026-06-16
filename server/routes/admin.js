@@ -9,7 +9,7 @@ router.use(authorize, requireAdmin);
 
 router.get('/users', async (req, res) => {
   try {
-    const result = await query('SELECT id, name, email, role, created_at, updated_at FROM users WHERE role = $1 ORDER BY name', ['salesperson']);
+    const result = await query('SELECT id, name, email, role, created_at, updated_at FROM users WHERE role != $1 ORDER BY name', ['admin']);
     return res.json({ users: result.rows });
   } catch (err) {
     console.error('Fetch users error', err);
