@@ -113,4 +113,23 @@ router.delete('/users/:id', async (req, res) => {
   }
 });
 
+router.get('/attendance', async (req, res) => {
+  const date = req.query.date || new Date().toISOString().split('T')[0];
+  try {
+    const result = await query(
+      `SELECT u.id, u.name, a.check_in, a.check_out,
+         EXTRACT(EPOCH FROM (a.check_out - a.check_in))/3600 AS hours
+       FROM users u
+       LEFT JOIN attendance a ON a.user_id = u.id AND a.date = $1::date
+       WHERE u.role = 'salesperson'
+       ORDER BY u.name`,
+      [date]
+    );
+    return res.json({ attendance: result.rows, date });
+  } catch (err) {
+    console.error('Fetch attendance error', err);
+    return res.status(500).json({ error: 'Unable to fetch attendance' });
+  }
+});
+
 export default router;

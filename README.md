@@ -86,6 +86,11 @@ The system includes automatic and manual backups to Google Drive using rclone.
 - ✅ Automatic cleanup of old local backups (>30 days)
 - ✅ Cron job scheduling for daily auto-backup
 
+## Running with PM2
+
+- Start: `cd server && pm2 start ecosystem.config.js`
+- Logs: `pm2 logs gps-tracker-server`
+
 ## Core Behavior
 
 - Android app uses Fused Location Provider with balanced power accuracy and significant movement thresholds.

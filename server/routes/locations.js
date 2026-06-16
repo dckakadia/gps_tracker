@@ -1,8 +1,23 @@
 import express from 'express';
+import rateLimit from 'express-rate-limit';
 import { query } from '../db/index.js';
 import { authorize, requireAdmin } from '../middleware/auth.js';
 
 const router = express.Router();
+
+const uploadLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  message: { error: 'Too many requests' },
+});
+
+function haversine(lat1, lon1, lat2, lon2) {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
 
 async function createUploadAudit({ userId, pointsCount, validPointsCount, status, errorMessage, ipAddress, requestBody }) {
   const auditQuery = `INSERT INTO location_upload_audit (user_id, points_count, valid_points_count, status, error_message, ip_address, request_body)
@@ -19,7 +34,7 @@ async function createUploadAudit({ userId, pointsCount, validPointsCount, status
   });
 }
 
-router.post('/', authorize, async (req, res) => {
+router.post('/', uploadLimiter, authorize, async (req, res) => {
   const points = Array.isArray(req.body) ? req.body : [req.body];
   const pointsReceived = points.length;
   const userId = req.user?.id;
@@ -43,9 +58,10 @@ router.post('/', authorize, async (req, res) => {
     const values = [];
     const placeholders = [];
     let validPointsCount = 0;
+    const validTimestamps = [];
 
     points.forEach((point, index) => {
-      const { latitude, longitude, recorded_at } = point;
+      const { latitude, longitude, recorded_at, battery_level } = point;
       if (
         typeof latitude !== 'number' ||
         typeof longitude !== 'number' ||
@@ -62,9 +78,11 @@ router.post('/', authorize, async (req, res) => {
         console.warn('Invalid timestamp skipped', { index, recorded_at });
         return;
       }
-      const idx = validPointsCount * 4;
-      placeholders.push(`($${idx + 1}, $${idx + 2}, $${idx + 3}, $${idx + 4}, NOW())`);
-      values.push(userId, latitude, longitude, recordedAtIso);
+      validTimestamps.push(recordedAtIso);
+      const batteryVal = (typeof battery_level === 'number') ? battery_level : null;
+      const idx = validPointsCount * 5;
+      placeholders.push(`($${idx + 1}, $${idx + 2}, $${idx + 3}, $${idx + 4}, NOW(), $${idx + 5})`);
+      values.push(userId, latitude, longitude, recordedAtIso, batteryVal);
       validPointsCount += 1;
     });
 
@@ -82,8 +100,58 @@ router.post('/', authorize, async (req, res) => {
       return res.status(400).json({ error: 'Valid location points required' });
     }
 
-    const queryText = `INSERT INTO locations (user_id, latitude, longitude, recorded_at, received_at) VALUES ${placeholders.join(', ')} RETURNING id`; 
+    const queryText = `INSERT INTO locations (user_id, latitude, longitude, recorded_at, received_at, battery_level) VALUES ${placeholders.join(', ')} RETURNING id`;
     await query(queryText, values);
+
+    // Attendance upsert: earliest timestamp as check_in (on INSERT), latest as check_out (always update)
+    try {
+      const earliest = validTimestamps[0];
+      const latest = validTimestamps[validTimestamps.length - 1];
+      await query(
+        `INSERT INTO attendance (user_id, date, check_in, check_out, updated_at)
+         VALUES ($1, CURRENT_DATE, $2, $3, NOW())
+         ON CONFLICT (user_id, date) DO UPDATE
+         SET check_out = EXCLUDED.check_out, updated_at = NOW()`,
+        [userId, earliest, latest]
+      );
+    } catch (attendanceErr) {
+      console.error('Failed to upsert attendance record', attendanceErr);
+    }
+
+    // Geofence checks
+    try {
+      const geofencesRes = await query('SELECT id, latitude, longitude, radius_meters FROM geofences');
+      const geofences = geofencesRes.rows;
+      if (geofences.length > 0) {
+        const io = req.app.get('io');
+        for (const point of points) {
+          const { latitude, longitude } = point;
+          if (typeof latitude !== 'number' || typeof longitude !== 'number') continue;
+          for (const gf of geofences) {
+            const distMeters = haversine(latitude, longitude, gf.latitude, gf.longitude) * 1000;
+            const isInside = distMeters <= gf.radius_meters;
+            const stateRes = await query(
+              'SELECT inside FROM user_geofence_state WHERE user_id = $1 AND geofence_id = $2',
+              [userId, gf.id]
+            );
+            const prevInside = stateRes.rows[0]?.inside ?? false;
+            await query(
+              `INSERT INTO user_geofence_state (user_id, geofence_id, inside)
+               VALUES ($1, $2, $3)
+               ON CONFLICT (user_id, geofence_id) DO UPDATE SET inside = EXCLUDED.inside`,
+              [userId, gf.id, isInside]
+            );
+            if (io && isInside !== prevInside) {
+              const event = isInside ? 'entered' : 'exited';
+              io.emit('geofence:alert', { user_id: userId, geofence_id: gf.id, event });
+            }
+          }
+        }
+      }
+    } catch (geofenceErr) {
+      console.error('Geofence check failed', geofenceErr);
+    }
+
     await createUploadAudit({
       userId,
       pointsCount: pointsReceived,
@@ -100,7 +168,7 @@ router.post('/', authorize, async (req, res) => {
       if (io) {
         const latestRes = await query(
           `SELECT u.id AS user_id, u.name, u.email, l.latitude, l.longitude, l.recorded_at, l.received_at,
-                  (l.recorded_at >= NOW() - INTERVAL '10 minutes') AS is_live
+                  (l.recorded_at >= NOW() - INTERVAL '10 minutes') AS is_live, l.battery_level
            FROM users u, locations l
            WHERE u.id = $1
            AND l.user_id = u.id
@@ -149,7 +217,8 @@ router.get('/latest', authorize, requireAdmin, async (req, res) => {
     const queryText = `
       SELECT u.id AS user_id, u.name AS name, u.email AS email,
              l.latitude, l.longitude, l.recorded_at, l.received_at,
-             (l.recorded_at >= NOW() - INTERVAL '10 minutes') AS is_live
+             (l.recorded_at >= NOW() - INTERVAL '10 minutes') AS is_live,
+             l.battery_level
       FROM users u
       INNER JOIN locations l ON l.user_id = u.id
       INNER JOIN (
@@ -198,6 +267,35 @@ router.get('/history/:userId', authorize, requireAdmin, async (req, res) => {
   } catch (err) {
     console.error('Fetch location history error', err);
     return res.status(500).json({ error: 'Unable to fetch location history' });
+  }
+});
+
+router.get('/stats/distance', authorize, requireAdmin, async (req, res) => {
+  const { user_id, date } = req.query;
+  if (!user_id || !date) {
+    return res.status(400).json({ error: 'user_id and date are required' });
+  }
+  try {
+    const dayStart = new Date(date + 'T00:00:00.000Z');
+    const dayEnd = new Date(dayStart.getTime() + 86400000);
+    const result = await query(
+      `SELECT latitude, longitude FROM locations
+       WHERE user_id = $1 AND recorded_at >= $2 AND recorded_at < $3
+       ORDER BY recorded_at ASC`,
+      [user_id, dayStart.toISOString(), dayEnd.toISOString()]
+    );
+    const pts = result.rows;
+    let distanceKm = 0;
+    for (let i = 1; i < pts.length; i++) {
+      distanceKm += haversine(
+        parseFloat(pts[i - 1].latitude), parseFloat(pts[i - 1].longitude),
+        parseFloat(pts[i].latitude), parseFloat(pts[i].longitude)
+      );
+    }
+    return res.json({ user_id: parseInt(user_id, 10), date, distance_km: Math.round(distanceKm * 100) / 100 });
+  } catch (err) {
+    console.error('Distance stats error', err);
+    return res.status(500).json({ error: 'Unable to compute distance' });
   }
 });
 
