@@ -126,7 +126,7 @@ router.get('/latest', authorize, requireAdmin, async (req, res) => {
          ORDER BY recorded_at DESC
          LIMIT 1
        ) l ON true
-       WHERE u.role IN ('salesperson', 'admin')
+       WHERE u.role != 'admin'
        ORDER BY u.name`;
 
     const result = await query(queryText);
