@@ -68,6 +68,7 @@ const port = process.env.PORT || 4000;
 // Attach io to app for routes to access
 app.set('io', io);
 
+app.set('trust proxy', 1); // trust nginx X-Forwarded-For so rate-limiter sees real client IP
 app.use(helmet());
 app.use(cors());
 app.use(express.json({ limit: '1mb' }));
