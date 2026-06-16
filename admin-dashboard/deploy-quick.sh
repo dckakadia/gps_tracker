@@ -52,9 +52,15 @@ server {
     gzip on;
     gzip_types text/plain text/css text/javascript application/javascript application/json;
     
-    # Service worker caching
-    location = /service_worker.js {
-        add_header Cache-Control "max-age=0, must-revalidate";
+    # Prevent caching of the Flutter service worker and version file
+    location = /flutter_service_worker.js {
+        add_header Cache-Control "no-cache, must-revalidate";
+        access_log off;
+    }
+
+    location = /version.json {
+        add_header Cache-Control "no-cache, must-revalidate";
+        access_log off;
     }
     
     # Regular asset caching

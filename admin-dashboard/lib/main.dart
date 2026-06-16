@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'dart:io';
 import 'screens/login_screen.dart';
 import 'screens/dashboard_screen.dart';
+import 'auth_state.dart';
 
 void main() {
   HttpOverrides.global = MyHttpOverrides();
@@ -17,6 +18,11 @@ class AdminDashboardApp extends StatelessWidget {
       home: LoginScreen(),
       routes: {
         '/login': (context) => LoginScreen(),
+        '/admin/history': (context) {
+          final token = AuthState.token;
+          if (token == null || token.isEmpty) return LoginScreen();
+          return DashboardScreen(token: token, initialIndex: 2);
+        },
       },
     );
   }

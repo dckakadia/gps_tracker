@@ -2,10 +2,12 @@ import 'package:flutter/material.dart';
 import 'map_screen.dart';
 import 'users_screen.dart';
 import 'backup_screen.dart';
+import 'history_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   final String token;
-  DashboardScreen({required this.token});
+  final int initialIndex;
+  DashboardScreen({required this.token, this.initialIndex = 1});
 
   @override
   _DashboardScreenState createState() => _DashboardScreenState();
@@ -15,10 +17,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
   int _selectedIndex = 0;
 
   @override
+  void initState() {
+    super.initState();
+    _selectedIndex = widget.initialIndex;
+  }
+
+  @override
   Widget build(BuildContext context) {
     final screens = [
       UsersScreen(token: widget.token),
       MapScreen(token: widget.token),
+      HistoryScreen(token: widget.token),
       BackupScreen(token: widget.token),
     ];
 
@@ -85,6 +94,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             label: Text('Live Map'),
                           ),
                           NavigationRailDestination(
+                            icon: Icon(Icons.history),
+                            label: Text('History'),
+                          ),
+                          NavigationRailDestination(
                             icon: Icon(Icons.backup),
                             label: Text('Backup'),
                           ),
@@ -107,6 +120,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   items: [
                     BottomNavigationBarItem(icon: Icon(Icons.people), label: 'Users'),
                     BottomNavigationBarItem(icon: Icon(Icons.map), label: 'Live Map'),
+                    BottomNavigationBarItem(icon: Icon(Icons.history), label: 'History'),
                     BottomNavigationBarItem(icon: Icon(Icons.backup), label: 'Backup'),
                   ],
                 ),

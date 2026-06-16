@@ -85,7 +85,7 @@ object NetworkDiagnostics {
         }
     }
     
-    fun logNetworkDiagnostics(context: Context, backendUrl: String = "http://localhost:4000/health") {
+    fun logNetworkDiagnostics(context: Context, backendUrl: String = "http://116.74.77.22:8095/health") {
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 val status = getNetworkStatus(context)

@@ -28,18 +28,23 @@ class _MapScreenState extends State<MapScreen> {
   LocationPoint? _selectedLocation;
   List<LocationPoint>? _locationHistory;
   bool _showingHistory = false;
+  bool _isPaused = false;
 
   @override
   void initState() {
     super.initState();
     _mapController = MapController();
     _fetchLocations();
-    _fetchTimer = Timer.periodic(Duration(seconds: 12), (_) => _fetchLocations());
+    _fetchTimer = Timer.periodic(Duration(seconds: 12), (_) {
+      if (!_isPaused) _fetchLocations();
+    });
     _countdownTimer = Timer.periodic(Duration(seconds: 1), (_) {
       setState(() {
-        _secondsUntilRefresh--;
-        if (_secondsUntilRefresh <= 0) {
-          _secondsUntilRefresh = 12;
+        if (!_isPaused) {
+          _secondsUntilRefresh--;
+          if (_secondsUntilRefresh <= 0) {
+            _secondsUntilRefresh = 12;
+          }
         }
       });
     });
@@ -345,10 +350,46 @@ class _MapScreenState extends State<MapScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.end,
                         children: [
-                          Text(
-                            'Refreshing in ${_secondsUntilRefresh}s',
-                            style: TextStyle(fontSize: 12, color: Colors.blue, fontWeight: FontWeight.w600),
-                          ),
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  'Refreshing in ${_isPaused ? '--' : _secondsUntilRefresh}s',
+                                  style: TextStyle(fontSize: 12, color: Colors.blue, fontWeight: FontWeight.w600),
+                                ),
+                                SizedBox(width: 12),
+                                ElevatedButton(
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: _isPaused ? Colors.green : Colors.amber,
+                                  ),
+                                  onPressed: () {
+                                    setState(() {
+                                      if (_isPaused) {
+                                        // Resume
+                                        _isPaused = false;
+                                        _secondsUntilRefresh = 12;
+                                        _fetchLocations();
+                                      } else {
+                                        // Pause
+                                        _isPaused = true;
+                                      }
+                                    });
+                                  },
+                                  child: Row(
+                                    children: [
+                                      Text(_isPaused ? '▶ Resume Live' : '⏸ Pause Live'),
+                                    ],
+                                  ),
+                                ),
+                                SizedBox(width: 8),
+                                if (_isPaused)
+                                  Container(
+                                    padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                    decoration: BoxDecoration(color: Colors.red, borderRadius: BorderRadius.circular(4)),
+                                    child: Text('PAUSED — not updating', style: TextStyle(color: Colors.white, fontSize: 12)),
+                                  ),
+                              ],
+                            ),
                           Text(
                             'Last: ${_lastUpdated != null ? _formatTimestamp(_lastUpdated!) : '--:--:--'}',
                             style: TextStyle(fontSize: 11, color: Colors.grey[600]),

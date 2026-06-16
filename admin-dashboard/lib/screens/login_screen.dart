@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
 import 'dashboard_screen.dart';
+import '../auth_state.dart';
 
 class LoginScreen extends StatefulWidget {
   @override
@@ -32,6 +33,7 @@ class _LoginScreenState extends State<LoginScreen> {
           return;
         }
 
+        AuthState.token = response['token'];
         Navigator.of(context).pushReplacement(MaterialPageRoute(
           builder: (_) => DashboardScreen(token: response['token']),
         ));
