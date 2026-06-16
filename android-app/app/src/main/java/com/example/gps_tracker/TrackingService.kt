@@ -28,6 +28,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
 class TrackingService : Service() {
+    private val AUTH_NOTIFICATION_CHANNEL_ID = "gps_tracker_auth_channel"
+    private val AUTH_NOTIFICATION_ID = 2
+
     private lateinit var fusedLocationClient: FusedLocationProviderClient
     private lateinit var locationCallback: LocationCallback
 
@@ -89,6 +92,34 @@ class TrackingService : Service() {
             .build()
 
         startForeground(1, notification)
+    }
+
+    private fun createAuthNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                AUTH_NOTIFICATION_CHANNEL_ID,
+                "GPS Tracker Auth Alerts",
+                NotificationManager.IMPORTANCE_HIGH
+            )
+            channel.description = "Notifications when auth token is missing or expired"
+            val manager = getSystemService(NotificationManager::class.java)
+            manager?.createNotificationChannel(channel)
+        }
+    }
+
+    private fun showAuthMissingNotification() {
+        createAuthNotificationChannel()
+
+        val notification = NotificationCompat.Builder(this, AUTH_NOTIFICATION_CHANNEL_ID)
+            .setContentTitle("Auth token missing")
+            .setContentText("Upload disabled. Re-login to restore server sync.")
+            .setSmallIcon(android.R.drawable.ic_dialog_alert)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_STATUS)
+            .build()
+
+        val manager = getSystemService(NotificationManager::class.java)
+        manager?.notify(AUTH_NOTIFICATION_ID, notification)
     }
 
     private fun startLocationUpdates() {
@@ -160,6 +191,7 @@ class TrackingService : Service() {
                 if (token == null) {
                     android.util.Log.w("TrackingService", "No auth token found. Storing location offline.")
                     android.util.Log.d("TrackingService", "Offline point details: lat=${point.latitude}, lng=${point.longitude}, recordedAt=${point.recordedAt}")
+                    showAuthMissingNotification()
                     LogPersistor.append(this@TrackingService, "TrackingService", "No auth token; storing offline point: lat=${point.latitude}, lng=${point.longitude}, recordedAt=${point.recordedAt}")
                     dao.insert(point)
                     scheduleSyncJob()

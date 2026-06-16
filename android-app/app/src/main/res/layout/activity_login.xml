@@ -130,6 +130,17 @@
                 android:textColor="@color/error_red"
                 android:textSize="12sp"
                 android:visibility="gone"
+                android:layout_marginBottom="8dp" />
+
+            <!-- Token Status -->
+            <TextView
+                android:id="@+id/tokenStatusText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Checking auth state..."
+                android:textColor="@color/text_dark"
+                android:textSize="12sp"
+                android:visibility="visible"
                 android:layout_marginBottom="12dp" />
 
             <!-- Login Button -->

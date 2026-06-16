@@ -27,6 +27,7 @@ class LoginActivity : AppCompatActivity() {
     private lateinit var loginButton: Button
     private lateinit var errorText: TextView
     private lateinit var loadingSpinner: ProgressBar
+    private lateinit var tokenStatusText: TextView
     private val LOCATION_PERMISSION_REQUEST = 100
     private val BACKGROUND_LOCATION_PERMISSION_REQUEST = 101
 
@@ -45,12 +46,15 @@ class LoginActivity : AppCompatActivity() {
         loginButton = findViewById(R.id.loginButton)
         errorText = findViewById(R.id.errorText)
         loadingSpinner = findViewById(R.id.loadingSpinner)
+        tokenStatusText = findViewById(R.id.tokenStatusText)
 
         loginButton.setOnClickListener {
             val email = emailInput.text.toString().trim()
             val password = passwordInput.text.toString().trim()
             attemptLogin(email, password)
         }
+
+        refreshTokenStatus()
 
         AuthManager.getToken(this)?.let { token ->
             ApiClient.setToken(token)
@@ -107,12 +111,28 @@ class LoginActivity : AppCompatActivity() {
                 if (loginResult.success && loginResult.token != null) {
                     AuthManager.saveToken(this@LoginActivity, loginResult.token)
                     ApiClient.setToken(loginResult.token)
+                    refreshTokenStatus()
                     startTrackingService()
                 } else {
                     displayError(loginResult.error ?: "Login failed")
                 }
             }
         }
+    }
+
+    private fun refreshTokenStatus() {
+        val hasToken = AuthManager.hasToken(this)
+        tokenStatusText.text = if (hasToken) {
+            "Auth token loaded — upload enabled"
+        } else {
+            "No auth token found — please sign in"
+        }
+        tokenStatusText.setTextColor(
+            ContextCompat.getColor(
+                this,
+                if (hasToken) R.color.success_green else R.color.error_red
+            )
+        )
     }
 
     private fun startTrackingService() {

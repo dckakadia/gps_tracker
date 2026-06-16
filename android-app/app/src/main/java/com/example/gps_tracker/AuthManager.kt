@@ -31,6 +31,10 @@ object AuthManager {
         return token
     }
 
+    fun hasToken(context: Context): Boolean {
+        return getToken(context) != null
+    }
+
     fun clearToken(context: Context) {
         // clear in-memory cache
         inMemoryToken = null

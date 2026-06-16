@@ -30,6 +30,9 @@ class MainActivity : AppCompatActivity() {
     private var locationManager: LocationManager? = null
     private var locationListener: LocationListener? = null
     private var updateTimer: Timer? = null
+    private lateinit var authStatusText: TextView
+    private lateinit var authBanner: View
+    private lateinit var authRetryButton: MaterialButton
 
     private val logUpdateCallback = {
         runOnUiThread { refreshLogPanel() }
@@ -49,15 +52,19 @@ class MainActivity : AppCompatActivity() {
             ensureLocationPermissionsAndStart()
         }
 
-        // Logout button from header
-        findViewById<android.widget.ImageButton>(R.id.logoutButtonHeader)?.setOnClickListener {
-            showLogoutDialog()
-        }
-
         // Logout button from footer
         findViewById<MaterialButton>(R.id.logoutButton)?.setOnClickListener {
             showLogoutDialog()
         }
+
+        authStatusText = findViewById(R.id.tvAuthStatus)
+        authBanner = findViewById(R.id.authBanner)
+        authRetryButton = findViewById(R.id.authRetryButton)
+        authRetryButton.setOnClickListener {
+            startActivity(Intent(this, LoginActivity::class.java))
+        }
+
+        updateAuthStatus()
 
         // Initialize location manager
         locationManager = getSystemService(LOCATION_SERVICE) as LocationManager
@@ -84,6 +91,7 @@ class MainActivity : AppCompatActivity() {
             runOnUiThread {
                 updateServiceStatus()
                 updateServerStats()
+                updateAuthStatus()
             }
         }
     }
@@ -98,6 +106,25 @@ class MainActivity : AppCompatActivity() {
         statusIndicator.setBackgroundResource(
             if (isServiceRunning) R.drawable.status_indicator_green else R.drawable.status_indicator
         )
+    }
+
+    private fun updateAuthStatus() {
+        val hasToken = AuthManager.hasToken(this)
+        val bannerVisible = !hasToken
+
+        authStatusText.text = if (hasToken) {
+            "Auth token loaded — uploads are enabled"
+        } else {
+            "No auth token — upload disabled. Please re-login."
+        }
+        authStatusText.setTextColor(
+            ContextCompat.getColor(
+                this,
+                if (hasToken) R.color.success_green else R.color.error_red
+            )
+        )
+
+        authBanner.visibility = if (bannerVisible) View.VISIBLE else View.GONE
     }
 
     private fun updateServerStats() {
@@ -119,6 +146,7 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         refreshLogPanel()
+        updateAuthStatus()
     }
 
     override fun onDestroy() {

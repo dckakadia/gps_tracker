@@ -21,25 +21,48 @@
         app:layout_constraintEnd_toEndOf="parent">
 
         <TextView
-            android:layout_width="0dp"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
             android:text="📍 GPS Tracker"
             android:textColor="@color/white"
             android:textSize="18sp"
             android:textStyle="bold" />
 
-        <ImageButton
-            android:id="@+id/logoutButtonHeader"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:src="@android:drawable/ic_menu_close_clear_cancel"
-            android:contentDescription="@string/app_name"
-            android:scaleType="centerInside"
-            android:tint="@color/white" />
-
     </androidx.appcompat.widget.LinearLayoutCompat>
+
+    <LinearLayout
+        android:id="@+id/authBanner"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:padding="12dp"
+        android:background="@color/error_red"
+        android:visibility="gone"
+        app:layout_constraintTop_toBottomOf="@id/headerBar"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <TextView
+            android:id="@+id/tvAuthBannerText"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Auth token missing. Upload disabled."
+            android:textColor="@color/white"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/authRetryButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Re-login"
+            android:textSize="12sp"
+            app:cornerRadius="8dp"
+            app:backgroundTint="@color/white"
+            android:textColor="@color/error_red" />
+
+    </LinearLayout>
 
     <!-- Scrollable Content -->
     <ScrollView
@@ -119,6 +142,15 @@
                         </LinearLayout>
 
                     </LinearLayout>
+
+                    <TextView
+                        android:id="@+id/tvAuthStatus"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Auth state: checking..."
+                        android:textColor="@color/text_dark"
+                        android:textSize="12sp"
+                        android:paddingTop="10dp" />
 
                 </LinearLayout>
 

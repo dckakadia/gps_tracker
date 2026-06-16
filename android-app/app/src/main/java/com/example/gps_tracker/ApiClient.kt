@@ -56,6 +56,10 @@ object ApiClient {
         authToken = token
     }
 
+    fun clearToken() {
+        authToken = null
+    }
+
     suspend fun login(email: String, password: String): LoginResult {
         return withContext(Dispatchers.IO) {
             try {
@@ -146,6 +150,11 @@ object ApiClient {
                                 LiveLogManager.totalCount++
                                 ServerStats.incrementTotal()
                                 LiveLogManager.log("❌", "Failed: HTTP ${response.code}")
+                                if (response.code == 401) {
+                                    android.util.Log.w("ApiClient", "401 Invalid token detected, clearing saved token")
+                                    AuthManager.clearToken(context)
+                                    clearToken()
+                                }
                             }
                         }
                     } catch (innerErr: Exception) {
