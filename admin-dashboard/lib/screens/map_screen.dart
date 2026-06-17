@@ -633,7 +633,8 @@ class _MapScreenState extends State<MapScreen> {
         children: List.generate(values.length, (i) {
           final selected = _filter == values[i];
           final dotColor = i == 1 ? AppTheme.liveGreen : i == 2 ? AppTheme.staleOrange : AppTheme.primaryLight;
-          return GestureDetector(
+          return InkWell(
+            borderRadius: BorderRadius.circular(20),
             onTap: () {
               setState(() => _filter = values[i]);
               WidgetsBinding.instance.addPostFrameCallback((_) => _autoZoomToMarkers(_filteredLocations));
@@ -666,40 +667,51 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   Widget _pauseButton() {
-    return GestureDetector(
-      onTap: () {
-        setState(() {
-          if (_isPaused) { _isPaused = false; _secondsUntilRefresh = 12; _fetchLocations(); }
-          else { _isPaused = true; }
-        });
-      },
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.95),
-          borderRadius: BorderRadius.circular(20),
-          boxShadow: AppTheme.cardShadow,
-          border: Border.all(color: _isPaused ? AppTheme.error.withOpacity(0.4) : AppTheme.border),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(_isPaused ? Icons.play_arrow_rounded : Icons.pause_rounded,
-                size: 16, color: _isPaused ? AppTheme.success : AppTheme.textMedium),
-            const SizedBox(width: 6),
-            Text(
-              _isPaused ? 'Resume' : 'Refreshing in ${_secondsUntilRefresh}s',
-              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600,
-                  color: _isPaused ? AppTheme.error : AppTheme.textMedium),
-            ),
-          ],
+    final isPaused = _isPaused;
+    return Material(
+      color: Colors.white.withOpacity(0.95),
+      borderRadius: BorderRadius.circular(20),
+      elevation: 2,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(20),
+        onTap: () {
+          setState(() {
+            if (isPaused) { _isPaused = false; _secondsUntilRefresh = 12; _fetchLocations(); }
+            else { _isPaused = true; }
+          });
+        },
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: isPaused ? AppTheme.error.withOpacity(0.5) : AppTheme.border),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                isPaused ? Icons.play_arrow_rounded : Icons.pause_rounded,
+                size: 16,
+                color: isPaused ? AppTheme.success : AppTheme.primaryLight,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                isPaused ? 'Resume auto-refresh' : 'Refresh in ${_secondsUntilRefresh}s',
+                style: TextStyle(
+                  fontSize: 12, fontWeight: FontWeight.w600,
+                  color: isPaused ? AppTheme.error : AppTheme.textDark,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 
   Widget _refreshBadge() {
-    return GestureDetector(
+    return InkWell(
+      borderRadius: BorderRadius.circular(12),
       onTap: () {
         setState(() {
           if (_isPaused) { _isPaused = false; _secondsUntilRefresh = 12; _fetchLocations(); }

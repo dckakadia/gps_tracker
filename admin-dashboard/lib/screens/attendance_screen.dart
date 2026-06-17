@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
+import '../theme/app_theme.dart';
 
 class AttendanceScreen extends StatefulWidget {
   final String token;
-  AttendanceScreen({required this.token});
+  const AttendanceScreen({required this.token});
 
   @override
   _AttendanceScreenState createState() => _AttendanceScreenState();
@@ -18,27 +19,20 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   @override
   void initState() {
     super.initState();
-    // addPostFrameCallback avoids calling setState during initState in Flutter web release mode
     WidgetsBinding.instance.addPostFrameCallback((_) => _loadAttendance());
   }
 
   Future<void> _loadAttendance() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+    if (!mounted) return;
+    setState(() { _loading = true; _error = null; });
     final dateStr = _selectedDate.toIso8601String().split('T')[0];
     try {
       final data = await ApiService.getAttendance(widget.token, date: dateStr);
-      setState(() {
-        _attendance = data;
-        _loading = false;
-      });
+      if (!mounted) return;
+      setState(() { _attendance = data; _loading = false; });
     } catch (err) {
-      setState(() {
-        _error = 'Failed to load attendance: $err';
-        _loading = false;
-      });
+      if (!mounted) return;
+      setState(() { _error = err.toString(); _loading = false; });
     }
   }
 
@@ -46,12 +40,8 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     if (isoString == null) return '--';
     try {
       final dt = DateTime.parse(isoString).toLocal();
-      final hh = dt.hour.toString().padLeft(2, '0');
-      final mm = dt.minute.toString().padLeft(2, '0');
-      return '$hh:$mm';
-    } catch (_) {
-      return '--';
-    }
+      return '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+    } catch (_) { return '--'; }
   }
 
   String _formatHours(dynamic hours) {
@@ -64,19 +54,30 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(16.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // ── Header bar ────────────────────────────────────────────────
+        Container(
+          color: AppTheme.surface,
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+          child: Row(
             children: [
-              Text(
-                'Attendance',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-              ),
-              SizedBox(width: 16),
-              TextButton(
+              const Icon(Icons.today, size: 20, color: AppTheme.primaryLight),
+              const SizedBox(width: 10),
+              const Text('Attendance', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: AppTheme.textDark)),
+              const SizedBox(width: 16),
+              // Date picker button
+              OutlinedButton.icon(
+                icon: const Icon(Icons.calendar_today, size: 14),
+                label: Text(_selectedDate.toIso8601String().split('T')[0],
+                    style: const TextStyle(fontSize: 13)),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppTheme.primaryLight,
+                  side: const BorderSide(color: AppTheme.border),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppTheme.radiusSm)),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                ),
                 onPressed: () async {
                   final picked = await showDatePicker(
                     context: context,
@@ -89,74 +90,138 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                     _loadAttendance();
                   }
                 },
-                child: Text(_selectedDate.toIso8601String().split('T')[0]),
               ),
-              SizedBox(width: 8),
-              ElevatedButton(
+              const SizedBox(width: 8),
+              ElevatedButton.icon(
+                icon: const Icon(Icons.refresh, size: 15),
+                label: const Text('Refresh'),
                 onPressed: _loading ? null : _loadAttendance,
-                child: Text('Refresh'),
               ),
+              const Spacer(),
+              // Summary chip
+              if (!_loading && _attendance.isNotEmpty)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: AppTheme.successLight,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text('${_attendance.length} staff',
+                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.success)),
+                ),
             ],
           ),
-          SizedBox(height: 12),
-          Expanded(
-            child: _buildContent(),
-          ),
-        ],
-      ),
+        ),
+        const Divider(height: 1),
+
+        // ── Content ───────────────────────────────────────────────────
+        Expanded(child: _buildContent()),
+      ],
     );
   }
 
   Widget _buildContent() {
     if (_loading) {
-      return Center(child: CircularProgressIndicator());
+      return const Center(child: CircularProgressIndicator());
     }
+
     if (_error != null) {
       return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.error_outline, color: Colors.red, size: 40),
-            SizedBox(height: 8),
-            Text(_error!, style: TextStyle(color: Colors.red)),
-            SizedBox(height: 12),
-            ElevatedButton(onPressed: _loadAttendance, child: Text('Retry')),
-          ],
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.error_outline, color: AppTheme.error, size: 40),
+              const SizedBox(height: 12),
+              Text('Failed to load attendance', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 6),
+              Text(_error!, style: const TextStyle(color: AppTheme.textMedium, fontSize: 13), textAlign: TextAlign.center),
+              const SizedBox(height: 16),
+              ElevatedButton.icon(
+                icon: const Icon(Icons.refresh, size: 15),
+                label: const Text('Retry'),
+                onPressed: _loadAttendance,
+              ),
+            ],
+          ),
         ),
       );
     }
+
     if (_attendance.isEmpty) {
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.event_busy, size: 48, color: Colors.grey),
-            SizedBox(height: 12),
-            Text(
-              'No attendance records for ${_selectedDate.toIso8601String().split('T')[0]}',
-              style: TextStyle(color: Colors.grey[600]),
+            Container(
+              width: 64, height: 64,
+              decoration: BoxDecoration(color: AppTheme.background, shape: BoxShape.circle),
+              child: const Icon(Icons.event_busy_outlined, size: 32, color: AppTheme.textLight),
             ),
+            const SizedBox(height: 14),
+            const Text('No attendance records', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: AppTheme.textDark)),
+            const SizedBox(height: 6),
+            Text('No data for ${_selectedDate.toIso8601String().split('T')[0]}',
+                style: const TextStyle(fontSize: 13, color: AppTheme.textMedium)),
           ],
         ),
       );
     }
+
     return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: DataTable(
-        columns: const [
-          DataColumn(label: Text('Name', style: TextStyle(fontWeight: FontWeight.bold))),
-          DataColumn(label: Text('Check-In', style: TextStyle(fontWeight: FontWeight.bold))),
-          DataColumn(label: Text('Check-Out', style: TextStyle(fontWeight: FontWeight.bold))),
-          DataColumn(label: Text('Hours in Field', style: TextStyle(fontWeight: FontWeight.bold))),
-        ],
-        rows: _attendance.map((a) {
-          return DataRow(cells: [
-            DataCell(Text(a['name'] ?? '--')),
-            DataCell(Text(_formatTime(a['check_in'] as String?))),
-            DataCell(Text(_formatTime(a['check_out'] as String?))),
-            DataCell(Text(_formatHours(a['hours']))),
-          ]);
-        }).toList(),
+      padding: const EdgeInsets.all(16),
+      child: Card(
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: DataTable(
+            headingRowColor: MaterialStateProperty.all(AppTheme.background),
+            headingTextStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: AppTheme.textDark),
+            dataTextStyle: const TextStyle(fontSize: 13, color: AppTheme.textDark),
+            columns: const [
+              DataColumn(label: Text('Name')),
+              DataColumn(label: Text('Check-In')),
+              DataColumn(label: Text('Check-Out')),
+              DataColumn(label: Text('Hours in Field')),
+              DataColumn(label: Text('Status')),
+            ],
+            rows: _attendance.map((a) {
+              final checkIn = a['check_in'] as String?;
+              final checkOut = a['check_out'] as String?;
+              final hours = a['hours'];
+              final present = checkIn != null;
+              return DataRow(cells: [
+                DataCell(Row(children: [
+                  CircleAvatar(
+                    radius: 14,
+                    backgroundColor: AppTheme.primaryLight.withOpacity(0.12),
+                    child: Text((a['name'] as String? ?? '?')[0].toUpperCase(),
+                        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppTheme.primaryLight)),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(a['name'] ?? '--', style: const TextStyle(fontWeight: FontWeight.w600)),
+                ])),
+                DataCell(Text(_formatTime(checkIn))),
+                DataCell(Text(_formatTime(checkOut))),
+                DataCell(Text(_formatHours(hours))),
+                DataCell(Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: present ? AppTheme.successLight : AppTheme.errorLight,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    present ? 'Present' : 'Absent',
+                    style: TextStyle(
+                      fontSize: 11, fontWeight: FontWeight.w600,
+                      color: present ? AppTheme.success : AppTheme.error,
+                    ),
+                  ),
+                )),
+              ]);
+            }).toList(),
+          ),
+        ),
       ),
     );
   }
