@@ -16,6 +16,7 @@ class DashboardScreen extends StatefulWidget {
 
 class _DashboardScreenState extends State<DashboardScreen> {
   int _selectedIndex = 0;
+  late final List<Widget> _screens;
 
   static const _primaryBlue = Color(0xFF1565C0);
   static const _accent = Color(0xFF1976D2);
@@ -24,6 +25,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
   void initState() {
     super.initState();
     _selectedIndex = widget.initialIndex;
+    // Create screens once — prevents initState re-running on every dashboard rebuild
+    _screens = [
+      MapScreen(token: widget.token),
+      HistoryScreen(token: widget.token),
+      AttendanceScreen(token: widget.token),
+      GeofenceScreen(token: widget.token),
+      AdminControlScreen(token: widget.token),
+    ];
   }
 
   static const _navItems = [
@@ -32,14 +41,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _NavItem(Icons.today_outlined, Icons.today, 'Attendance'),
     _NavItem(Icons.fence_outlined, Icons.fence, 'Geofences'),
     _NavItem(Icons.admin_panel_settings_outlined, Icons.admin_panel_settings, 'Admin'),
-  ];
-
-  List<Widget> get _screens => [
-    MapScreen(token: widget.token),
-    HistoryScreen(token: widget.token),
-    AttendanceScreen(token: widget.token),
-    GeofenceScreen(token: widget.token),
-    AdminControlScreen(token: widget.token),
   ];
 
   @override
@@ -57,10 +58,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     children: [
                       _buildNavRail(),
                       const VerticalDivider(width: 1),
-                      Expanded(child: _screens[_selectedIndex]),
+                      Expanded(child: IndexedStack(index: _selectedIndex, children: _screens)),
                     ],
                   )
-                : _screens[_selectedIndex],
+                : IndexedStack(index: _selectedIndex, children: _screens),
           ),
           bottomNavigationBar: isWide ? null : _buildBottomNav(),
         );

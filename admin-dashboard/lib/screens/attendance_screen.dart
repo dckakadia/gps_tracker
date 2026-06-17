@@ -46,7 +46,13 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
 
   String _formatHours(dynamic hours) {
     if (hours == null) return '--';
-    final h = (hours as num).toDouble();
+    // PostgreSQL EXTRACT returns numeric → node-postgres sends it as a JS string
+    final double h;
+    if (hours is num) {
+      h = hours.toDouble();
+    } else {
+      h = double.tryParse(hours.toString()) ?? 0.0;
+    }
     final hoursInt = h.floor();
     final minutes = ((h - hoursInt) * 60).round();
     return '${hoursInt}h ${minutes}m';
@@ -175,7 +181,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         child: SingleChildScrollView(
           scrollDirection: Axis.horizontal,
           child: DataTable(
-            headingRowColor: MaterialStateProperty.all(AppTheme.background),
+            headingRowColor: WidgetStateProperty.all(AppTheme.background),
             headingTextStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: AppTheme.textDark),
             dataTextStyle: const TextStyle(fontSize: 13, color: AppTheme.textDark),
             columns: const [
