@@ -40,8 +40,8 @@ class TrackingService : Service() {
     // Batch upload state
     private val pendingPoints = mutableListOf<LocationEntity>()
     private var lastUploadTime = 0L
-    private val BATCH_SIZE = 10
-    private val BATCH_INTERVAL_MS = 2 * 60 * 1000L // 2 minutes
+    private val BATCH_SIZE = 3                        // upload after 3 points (~90s at 30s interval)
+    private val BATCH_INTERVAL_MS = 45 * 1000L        // or every 45s — before Android kills service
 
     override fun onCreate() {
         super.onCreate()
