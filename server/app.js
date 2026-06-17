@@ -12,6 +12,7 @@ import usersRoutes from './routes/users.js';
 import locationRoutes from './routes/locations.js';
 import backupRoutes from './routes/backup.js';
 import geofencesRoutes from './routes/geofences.js';
+import appRoutes from './routes/app.js';
 import { performBackup } from './services/backup.js';
 import { initializeUsername } from './db/init-username.js';
 import { initializeUploadAudit } from './db/init-upload-audit.js';
@@ -80,6 +81,7 @@ app.use('/api/users', usersRoutes);
 app.use('/api/locations', locationRoutes);
 app.use('/api/backup', backupRoutes);
 app.use('/api/geofences', geofencesRoutes);
+app.use('/api/app', appRoutes);
 
 app.get('/health', async (req, res) => {
   try {

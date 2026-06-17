@@ -19,6 +19,7 @@
     "firebase-admin": "^14.0.0",
     "helmet": "^7.0.0",
     "jsonwebtoken": "^9.0.2",
+    "multer": "^2.2.0",
     "node-cron": "^3.0.2",
     "pg": "^8.19.0",
     "pg-mem": "^3.0.14",

@@ -25,6 +25,8 @@ import kotlinx.coroutines.launch
 import kotlin.concurrent.timer
 import java.util.Timer
 
+@Suppress("DEPRECATION")
+
 class MainActivity : AppCompatActivity() {
     private val LOCATION_PERMISSION_REQUEST_CODE = 100
     private var locationManager: LocationManager? = null
@@ -33,6 +35,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var authStatusText: TextView
     private lateinit var authBanner: View
     private lateinit var authRetryButton: MaterialButton
+    private lateinit var btnUpdate: MaterialButton
+    private var pendingUpdateInfo: UpdateChecker.VersionInfo? = null
 
     private val logUpdateCallback = {
         runOnUiThread { refreshLogPanel() }
@@ -64,7 +68,30 @@ class MainActivity : AppCompatActivity() {
             startActivity(Intent(this, LoginActivity::class.java))
         }
 
+        // Show current version in header
+        findViewById<TextView>(R.id.tvAppVersion).text = "v${BuildConfig.VERSION_NAME}"
+
+        // Update button wires to cached update info
+        btnUpdate = findViewById(R.id.btnUpdate)
+        btnUpdate.setOnClickListener {
+            pendingUpdateInfo?.let { info ->
+                UpdateChecker.showUpdateDialog(this, info)
+            }
+        }
+
         updateAuthStatus()
+
+        // Check for updates silently in background
+        GlobalScope.launch {
+            val info = UpdateChecker.checkForUpdate(this@MainActivity)
+            if (info != null) {
+                pendingUpdateInfo = info
+                runOnUiThread {
+                    btnUpdate.visibility = View.VISIBLE
+                    UpdateChecker.showUpdateDialog(this@MainActivity, info)
+                }
+            }
+        }
 
         // Register FCM token if logged in
         if (AuthManager.hasToken(this)) {

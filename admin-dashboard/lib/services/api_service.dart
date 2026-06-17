@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import '../models/user.dart';
 import '../models/location_point.dart';
@@ -219,5 +220,48 @@ class ApiService {
       headers: {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'},
       body: jsonEncode({'user_id': userId, 'message': message}),
     );
+  }
+
+  static Future<Map<String, dynamic>> getAppVersion() async {
+    final uri = buildUri('/app/version');
+    final response = await http.get(uri);
+    final body = response.body.isNotEmpty
+        ? jsonDecode(response.body) as Map<String, dynamic>
+        : <String, dynamic>{};
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception(body['error'] ?? 'Failed to fetch version info');
+    }
+    return body;
+  }
+
+  static Future<Map<String, dynamic>> uploadApk(
+    String token, {
+    required String version,
+    required String versionCode,
+    required String releaseNotes,
+    required Uint8List fileBytes,
+    required String fileName,
+  }) async {
+    final uri = buildUri('/app/upload');
+    final request = http.MultipartRequest('POST', uri)
+      ..headers['Authorization'] = 'Bearer $token'
+      ..fields['version'] = version
+      ..fields['versionCode'] = versionCode
+      ..fields['releaseNotes'] = releaseNotes
+      ..files.add(http.MultipartFile.fromBytes(
+        'apk',
+        fileBytes,
+        filename: fileName,
+      ));
+
+    final streamed = await request.send();
+    final response = await http.Response.fromStream(streamed);
+    final body = response.body.isNotEmpty
+        ? jsonDecode(response.body) as Map<String, dynamic>
+        : <String, dynamic>{};
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception(body['error'] ?? 'Upload failed');
+    }
+    return body;
   }
 }

@@ -13,7 +13,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 
 object ApiClient {
-    private const val BASE_URL = "http://116.74.77.22:8095/api"
+    const val BASE_URL = "http://116.74.77.22:8095/api"
     private var authToken: String? = null
 
     private val client = OkHttpClient.Builder()

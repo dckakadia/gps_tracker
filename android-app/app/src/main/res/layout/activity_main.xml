@@ -11,7 +11,7 @@
     <androidx.appcompat.widget.LinearLayoutCompat
         android:id="@+id/headerBar"
         android:layout_width="0dp"
-        android:layout_height="56dp"
+        android:layout_height="60dp"
         android:background="@color/primary"
         android:orientation="horizontal"
         android:gravity="center_vertical"
@@ -20,13 +20,40 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintEnd_toEndOf="parent">
 
-        <TextView
-            android:layout_width="match_parent"
+        <LinearLayout
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:text="📍 GPS Tracker"
-            android:textColor="@color/white"
-            android:textSize="18sp"
-            android:textStyle="bold" />
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="📍 GPS Tracker"
+                android:textColor="@color/white"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/tvAppVersion"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="v1.0.1"
+                android:textColor="#B3FFFFFF"
+                android:textSize="11sp" />
+
+        </LinearLayout>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnUpdate"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:text="Update"
+            android:textSize="11sp"
+            android:visibility="gone"
+            app:cornerRadius="18dp"
+            app:backgroundTint="#FF9800"
+            android:textColor="@color/white" />
 
     </androidx.appcompat.widget.LinearLayoutCompat>
 
