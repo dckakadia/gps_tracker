@@ -18,7 +18,8 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   @override
   void initState() {
     super.initState();
-    _loadAttendance();
+    // addPostFrameCallback avoids calling setState during initState in Flutter web release mode
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadAttendance());
   }
 
   Future<void> _loadAttendance() async {

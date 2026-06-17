@@ -32,6 +32,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
   LatLng? _replayPosition;
 
   late MapController _mapController;
+  double _currentZoom = 13.0;
 
   @override
   void initState() {
@@ -75,7 +76,12 @@ class _HistoryScreenState extends State<HistoryScreen> {
         _points = history;
         _loading = false;
       });
-      if (_points.isNotEmpty) _fitMapToPoints(_points);
+      // Map renders conditionally on hasData — wait for next frame before moving the controller
+      if (_points.isNotEmpty) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _fitMapToPoints(_points);
+        });
+      }
     } catch (err) {
       setState(() {
         _error = 'Failed to load history: $err';
@@ -132,7 +138,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
           return;
         }
         _replayPosition = LatLng(_points[_replayIndex].latitude, _points[_replayIndex].longitude);
-        _mapController.move(_replayPosition!, _mapController.zoom);
+        _mapController.move(_replayPosition!, _currentZoom);
       });
     });
   }
@@ -364,7 +370,13 @@ class _HistoryScreenState extends State<HistoryScreen> {
               children: [
                 FlutterMap(
                   mapController: _mapController,
-                  options: MapOptions(center: const LatLng(20, 0), zoom: 5),
+                  options: MapOptions(
+                    center: const LatLng(20, 0),
+                    zoom: 5,
+                    onMapEvent: (event) {
+                      if (event is MapEventMove) _currentZoom = event.targetZoom;
+                    },
+                  ),
                   children: [
                     TileLayer(
                       urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
