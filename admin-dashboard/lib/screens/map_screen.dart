@@ -542,15 +542,7 @@ class _MapScreenState extends State<MapScreen> {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Row(mainAxisSize: MainAxisSize.min, children: [
-                        Icon(Icons.location_pin, color: color, size: 36),
-                        if (battery != null) ...[
-                          Icon(battIcon, color: battColor, size: 16),
-                          Text('$battery%',
-                              style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: battColor,
-                                  shadows: const [Shadow(color: Colors.white, blurRadius: 3)])),
-                        ],
-                      ]),
+                      Icon(Icons.location_pin, color: color, size: 36),
                       Container(
                         width: 155,
                         padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 5),
@@ -573,9 +565,20 @@ class _MapScreenState extends State<MapScreen> {
                                 child: Icon(Icons.message, size: 13, color: isSelected ? Colors.white70 : AppTheme.primaryLight),
                               ),
                             ]),
-                            const SizedBox(height: 2),
-                            Text(_statusText(loc),
-                                style: TextStyle(fontSize: 10, color: isSelected ? Colors.white70 : AppTheme.textMedium)),
+                            const SizedBox(height: 3),
+                            // Battery row — always shown
+                            Row(children: [
+                              Icon(battIcon, size: 12, color: isSelected ? Colors.white70 : battColor),
+                              const SizedBox(width: 3),
+                              Text(
+                                battery != null ? '$battery%' : 'No data',
+                                style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600,
+                                    color: isSelected ? Colors.white70 : battColor),
+                              ),
+                              const SizedBox(width: 6),
+                              Text(_statusText(loc),
+                                  style: TextStyle(fontSize: 10, color: isSelected ? Colors.white60 : AppTheme.textMedium)),
+                            ]),
                             if (distKm != null)
                               Text('${distKm.toStringAsFixed(1)} km today',
                                   style: TextStyle(fontSize: 10, color: isSelected ? Colors.white70 : AppTheme.textMedium)),
@@ -745,6 +748,16 @@ class _MapScreenState extends State<MapScreen> {
     final color = _pinColor(loc);
     final isSelected = _selectedLocation?.userId == loc.userId;
     final distKm = _userDistances[loc.userId];
+    final battery = loc.batteryLevel;
+    final battColor = battery == null ? AppTheme.textLight
+        : battery < 20 ? AppTheme.error
+        : battery < 50 ? AppTheme.staleOrange
+        : AppTheme.success;
+    final battIcon = battery == null ? Icons.battery_unknown
+        : battery > 80 ? Icons.battery_full
+        : battery > 50 ? Icons.battery_5_bar
+        : battery > 20 ? Icons.battery_3_bar
+        : Icons.battery_alert;
 
     return Material(
       color: isSelected ? AppTheme.primary.withOpacity(0.06) : Colors.transparent,
@@ -769,6 +782,13 @@ class _MapScreenState extends State<MapScreen> {
                         color: isSelected ? AppTheme.primary : AppTheme.textDark), overflow: TextOverflow.ellipsis),
                     const SizedBox(height: 2),
                     Row(children: [
+                      Icon(battIcon, size: 13, color: battColor),
+                      const SizedBox(width: 3),
+                      Text(
+                        battery != null ? '$battery%' : '--',
+                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: battColor),
+                      ),
+                      const Text('  ·  ', style: TextStyle(color: AppTheme.textLight)),
                       Text(_lastSeenText(loc), style: const TextStyle(fontSize: 11, color: AppTheme.textMedium)),
                       if (distKm != null) ...[
                         const Text(' · ', style: TextStyle(color: AppTheme.textLight)),
