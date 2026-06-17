@@ -4,16 +4,10 @@ import android.Manifest
 import android.app.ActivityManager
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.graphics.Color
-import android.graphics.Typeface
-import android.location.Location
-import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Build
 import android.os.Bundle
 import android.view.View
-import android.widget.LinearLayout
-import android.widget.ScrollView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AlertDialog
@@ -38,17 +32,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnUpdate: MaterialButton
     private var pendingUpdateInfo: UpdateChecker.VersionInfo? = null
 
-    private val logUpdateCallback = {
-        runOnUiThread { refreshLogPanel() }
-    }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
-
-        // Register the log listener before showing existing logs.
-        LiveLogManager.addLogListener(logUpdateCallback)
-        refreshLogPanel()
 
         // Start Tracking Button
         findViewById<MaterialButton>(R.id.startTrackingButton).setOnClickListener {
@@ -68,8 +54,14 @@ class MainActivity : AppCompatActivity() {
             startActivity(Intent(this, LoginActivity::class.java))
         }
 
-        // Show current version in header
-        findViewById<TextView>(R.id.tvAppVersion).text = "v${BuildConfig.VERSION_NAME}"
+        // Show current version in header. Long-press opens the hidden debug screen.
+        findViewById<TextView>(R.id.tvAppVersion).apply {
+            text = "v${BuildConfig.VERSION_NAME}"
+            setOnLongClickListener {
+                startActivity(Intent(this@MainActivity, DebugActivity::class.java))
+                true
+            }
+        }
 
         // Update button wires to cached update info
         btnUpdate = findViewById(R.id.btnUpdate)
@@ -104,9 +96,6 @@ class MainActivity : AppCompatActivity() {
         // Start updating UI every 2 seconds
         startUIRefresh()
 
-        // Initialize with mock data for demonstration
-        initializeMockData()
-
         // Auto-start tracking if permissions already granted
         val requiredPermissions = mutableListOf(
             Manifest.permission.ACCESS_FINE_LOCATION,
@@ -128,29 +117,20 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun initializeMockData() {
-        // Set mock location for demonstration
-        runOnUiThread {
-            findViewById<TextView>(R.id.tvLatitude).text = "40.7128"
-            findViewById<TextView>(R.id.tvLongitude).text = "-74.0060"
-            findViewById<TextView>(R.id.tvAccuracy).text = "12.5m"
-            updateServiceStatus()
-        }
-    }
-
     private fun startUIRefresh() {
         updateTimer = timer(initialDelay = 1000, period = 2000) {
             runOnUiThread {
                 updateServiceStatus()
-                updateServerStats()
+                updateCheckIn()
                 updateAuthStatus()
+                updateOverallStatus()
             }
         }
     }
 
     private fun updateServiceStatus() {
         val isServiceRunning = isTrackingServiceRunning()
-        val statusText = if (isServiceRunning) "Running" else "Not Running"
+        val statusText = if (isServiceRunning) "Tracking ON" else "Tracking OFF"
         val statusIndicator = findViewById<View>(R.id.statusIndicator)
         val statusTextView = findViewById<TextView>(R.id.tvServiceStatus)
 
@@ -158,6 +138,34 @@ class MainActivity : AppCompatActivity() {
         statusIndicator.setBackgroundResource(
             if (isServiceRunning) R.drawable.status_indicator_green else R.drawable.status_indicator
         )
+    }
+
+    private fun updateCheckIn() {
+        // TODO: no check-in endpoint exists yet. Once a server endpoint is added,
+        // populate today's check-in time and compute elapsed hours from it.
+        findViewById<TextView>(R.id.tvCheckIn).text = "Check-in: —"
+        findViewById<TextView>(R.id.tvElapsed).text = "Elapsed: —"
+    }
+
+    private fun updateOverallStatus() {
+        val statusView = findViewById<TextView>(R.id.tvOverallStatus)
+        val hasToken = AuthManager.hasToken(this)
+        val isServiceRunning = isTrackingServiceRunning()
+
+        when {
+            !hasToken -> {
+                statusView.text = "Tap to fix — re-login required"
+                statusView.setTextColor(ContextCompat.getColor(this, R.color.error_red))
+            }
+            !isServiceRunning -> {
+                statusView.text = "Tap to fix — start tracking"
+                statusView.setTextColor(ContextCompat.getColor(this, R.color.error_red))
+            }
+            else -> {
+                statusView.text = "All good ✓"
+                statusView.setTextColor(ContextCompat.getColor(this, R.color.success_green))
+            }
+        }
     }
 
     private fun updateAuthStatus() {
@@ -179,15 +187,6 @@ class MainActivity : AppCompatActivity() {
         authBanner.visibility = if (bannerVisible) View.VISIBLE else View.GONE
     }
 
-    private fun updateServerStats() {
-        // Get stats from a shared tracking object
-        val successCount = ServerStats.successfulRequests
-        val totalCount = ServerStats.totalRequests
-
-        findViewById<TextView>(R.id.tvSuccessCount).text = successCount.toString()
-        findViewById<TextView>(R.id.tvTotalCount).text = totalCount.toString()
-    }
-
     private fun isTrackingServiceRunning(): Boolean {
         val manager = getSystemService(ACTIVITY_SERVICE) as ActivityManager
         return manager.getRunningServices(Integer.MAX_VALUE).any {
@@ -197,12 +196,10 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        refreshLogPanel()
         updateAuthStatus()
     }
 
     override fun onDestroy() {
-        LiveLogManager.removeLogListener(logUpdateCallback)
         updateTimer?.cancel()
         super.onDestroy()
     }
@@ -276,26 +273,6 @@ class MainActivity : AppCompatActivity() {
                     android.util.Log.w("MainActivity", "Location permissions denied: ${permissions.joinToString()}")
                 }
             }
-        }
-    }
-
-    private fun refreshLogPanel() {
-        val logContainer = findViewById<LinearLayout>(R.id.logContainer)
-        
-        logContainer.removeAllViews()
-        LiveLogManager.logs.forEach { entry ->
-            val tv = TextView(this)
-            tv.text = entry
-            tv.typeface = Typeface.MONOSPACE
-            tv.textSize = 10f
-            tv.setPadding(8, 4, 8, 4)
-            tv.setTextColor(when {
-                entry.contains("✅") -> Color.parseColor("#2E7D32")
-                entry.contains("❌") -> Color.parseColor("#C62828")
-                entry.contains("⚠️") -> Color.parseColor("#E65100")
-                else -> Color.parseColor("#1565C0")
-            })
-            logContainer.addView(tv)
         }
     }
 }
