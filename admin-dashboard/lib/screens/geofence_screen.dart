@@ -144,6 +144,98 @@ class _GeofenceScreenState extends State<GeofenceScreen> {
     }
   }
 
+  Future<void> _editGeofence(Map<String, dynamic> gf) async {
+    final id = gf['id'] as int;
+    final nameController = TextEditingController(text: gf['name'] as String? ?? '');
+    final radiusController = TextEditingController(
+      text: ((gf['radius_meters'] as num?)?.toDouble() ?? 500.0).toStringAsFixed(0),
+    );
+    final latitude = (gf['latitude'] as num).toDouble();
+    final longitude = (gf['longitude'] as num).toDouble();
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppTheme.radius)),
+        title: const Row(
+          children: [
+            Icon(Icons.edit_location_alt, color: AppTheme.primaryLight),
+            SizedBox(width: 10),
+            Text('Edit Geofence', style: TextStyle(fontWeight: FontWeight.w700)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: nameController,
+              autofocus: true,
+              decoration: const InputDecoration(
+                labelText: 'Name',
+                prefixIcon: Icon(Icons.label_outline, size: 18),
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: radiusController,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: 'Radius (meters)',
+                prefixIcon: Icon(Icons.radio_button_unchecked, size: 18),
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                const Icon(Icons.info_outline, size: 14, color: AppTheme.textMedium),
+                const SizedBox(width: 6),
+                Text(
+                  'Center: ${latitude.toStringAsFixed(4)}, ${longitude.toStringAsFixed(4)}',
+                  style: const TextStyle(fontSize: 11, color: AppTheme.textMedium),
+                ),
+              ],
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          ElevatedButton.icon(
+            icon: const Icon(Icons.check, size: 16),
+            label: const Text('Save'),
+            onPressed: () => Navigator.pop(ctx, true),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || nameController.text.trim().isEmpty) return;
+    try {
+      await ApiService.updateGeofence(
+        widget.token,
+        id,
+        name: nameController.text.trim(),
+        latitude: latitude,
+        longitude: longitude,
+        radiusMeters: double.tryParse(radiusController.text) ?? 500.0,
+      );
+      _loadGeofences();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Geofence updated'),
+            backgroundColor: AppTheme.success,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+    }
+  }
+
   Future<void> _deleteGeofence(int id, String name) async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -352,6 +444,13 @@ class _GeofenceScreenState extends State<GeofenceScreen> {
                               ),
                             ],
                           ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.edit_outlined, size: 18, color: AppTheme.primaryLight),
+                          tooltip: 'Edit',
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                          onPressed: () => _editGeofence(gf),
                         ),
                         IconButton(
                           icon: const Icon(Icons.delete_outline, size: 18, color: AppTheme.error),

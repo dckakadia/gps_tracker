@@ -264,4 +264,32 @@ class ApiService {
     }
     return body;
   }
+
+  static Future<Map<String, dynamic>> updateGeofence(
+    String token,
+    int id, {
+    required String name,
+    required double latitude,
+    required double longitude,
+    required double radiusMeters,
+  }) async {
+    final uri = buildUri('/geofences/$id');
+    final response = await http.put(
+      uri,
+      headers: {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'name': name,
+        'latitude': latitude,
+        'longitude': longitude,
+        'radius_meters': radiusMeters,
+      }),
+    );
+    final body = response.body.isNotEmpty
+        ? jsonDecode(response.body) as Map<String, dynamic>
+        : <String, dynamic>{};
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception(body['error'] ?? 'Failed to update geofence');
+    }
+    return body;
+  }
 }
