@@ -174,11 +174,28 @@ class _MapScreenState extends State<MapScreen> {
             Text('Notify $userName', style: const TextStyle(fontWeight: FontWeight.w700)),
           ],
         ),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          maxLines: 3,
-          decoration: const InputDecoration(hintText: 'Enter message...', border: OutlineInputBorder()),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Wrap(
+              spacing: 8,
+              children: [
+                for (final template in ['Running late?', 'Please check in', 'Heading to next stop?'])
+                  ActionChip(
+                    label: Text(template, style: const TextStyle(fontSize: 12)),
+                    onPressed: () => controller.text = template,
+                  ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: controller,
+              autofocus: true,
+              maxLines: 3,
+              decoration: const InputDecoration(hintText: 'Enter message...', border: OutlineInputBorder()),
+            ),
+          ],
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
