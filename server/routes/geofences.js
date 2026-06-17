@@ -54,6 +54,60 @@ router.put('/:id', authorize, requireAdmin, async (req, res) => {
   }
 });
 
+// Persist a geofence enter/exit event.
+router.post('/events', authorize, requireAdmin, async (req, res) => {
+  const { user_id, geofence_id, event_type } = req.body;
+  if (user_id == null || geofence_id == null || !['enter', 'exit'].includes(event_type)) {
+    return res.status(400).json({ error: 'user_id, geofence_id, and a valid event_type (enter|exit) are required' });
+  }
+  try {
+    const result = await query(
+      'INSERT INTO geofence_events (user_id, geofence_id, event_type) VALUES ($1, $2, $3) RETURNING *',
+      [user_id, geofence_id, event_type]
+    );
+    return res.status(201).json({ event: result.rows[0] });
+  } catch (err) {
+    console.error('Create geofence event error', err);
+    return res.status(500).json({ error: 'Unable to record geofence event' });
+  }
+});
+
+// List geofence events with user and geofence names, filterable by date and user.
+router.get('/events', authorize, requireAdmin, async (req, res) => {
+  const { date, userId } = req.query;
+  const params = [];
+  const conditions = [];
+
+  if (date) {
+    params.push(date);
+    conditions.push(`e.occurred_at >= $${params.length}::date AND e.occurred_at < ($${params.length}::date + INTERVAL '1 day')`);
+  }
+  if (userId) {
+    params.push(userId);
+    conditions.push(`e.user_id = $${params.length}`);
+  }
+
+  const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+
+  try {
+    const result = await query(
+      `SELECT e.id, e.user_id, e.geofence_id, e.event_type, e.occurred_at,
+              u.name AS user_name, g.name AS geofence_name
+       FROM geofence_events e
+       LEFT JOIN users u ON u.id = e.user_id
+       LEFT JOIN geofences g ON g.id = e.geofence_id
+       ${whereClause}
+       ORDER BY e.occurred_at DESC
+       LIMIT 500`,
+      params
+    );
+    return res.json({ events: result.rows });
+  } catch (err) {
+    console.error('Fetch geofence events error', err);
+    return res.status(500).json({ error: 'Unable to fetch geofence events' });
+  }
+});
+
 router.delete('/:id', authorize, requireAdmin, async (req, res) => {
   const { id } = req.params;
   try {

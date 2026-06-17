@@ -106,6 +106,7 @@ class _MapScreenState extends State<MapScreen> {
           final d = Map<String, dynamic>.from(data);
           final event = d['event'] as String? ?? '';
           final geofenceId = d['geofence_id'];
+          final userId = d['user_id'];
           final gf = _geofences.firstWhere((g) => g['id'] == geofenceId, orElse: () => {'name': 'Geofence'});
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
@@ -115,6 +116,12 @@ class _MapScreenState extends State<MapScreen> {
                 backgroundColor: AppTheme.warning,
               ),
             );
+          }
+          // Persist the event for the Events history screen.
+          if (userId != null && geofenceId != null) {
+            final eventType = event == 'entered' ? 'enter' : 'exit';
+            ApiService.postGeofenceEvent(widget.token, userId as int, geofenceId as int, eventType)
+                .catchError((_) {});
           }
         } catch (_) {}
       });

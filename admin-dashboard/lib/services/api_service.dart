@@ -265,6 +265,53 @@ class ApiService {
     return body;
   }
 
+  static Future<void> postGeofenceEvent(
+    String token,
+    int userId,
+    int geofenceId,
+    String eventType,
+  ) async {
+    final uri = buildUri('/geofences/events');
+    final response = await http.post(
+      uri,
+      headers: {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'user_id': userId,
+        'geofence_id': geofenceId,
+        'event_type': eventType,
+      }),
+    );
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      final body = response.body.isNotEmpty
+          ? jsonDecode(response.body) as Map<String, dynamic>
+          : <String, dynamic>{};
+      throw Exception(body['error'] ?? 'Failed to record geofence event');
+    }
+  }
+
+  static Future<List<Map<String, dynamic>>> getGeofenceEvents(
+    String token, {
+    String? date,
+    int? userId,
+  }) async {
+    final params = <String, String>{};
+    if (date != null) params['date'] = date;
+    if (userId != null) params['userId'] = userId.toString();
+    final queryString = params.isEmpty
+        ? ''
+        : '?' + params.entries.map((e) => '${e.key}=${e.value}').join('&');
+    final uri = buildUri('/geofences/events$queryString');
+    final response = await http.get(uri, headers: {'Authorization': 'Bearer $token'});
+    final body = response.body.isNotEmpty
+        ? jsonDecode(response.body) as Map<String, dynamic>
+        : <String, dynamic>{};
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception(body['error'] ?? 'Failed to load geofence events');
+    }
+    final events = (body['events'] as List?) ?? <dynamic>[];
+    return events.map((e) => e as Map<String, dynamic>).toList();
+  }
+
   static Future<Map<String, dynamic>> updateGeofence(
     String token,
     int id, {

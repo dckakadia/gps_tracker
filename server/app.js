@@ -23,6 +23,7 @@ import { initializeAttendance } from './db/init-attendance.js';
 import { initializeBatteryColumn } from './db/init-battery.js';
 import { initializeArchive } from './db/init-archive.js';
 import { initializeGeofences } from './db/init-geofences.js';
+import { migrateGeofenceEvents } from './db/migrate-geofence-events.js';
 import { initializeFcm } from './db/init-fcm.js';
 import pool from './db/index.js';
 
@@ -198,6 +199,12 @@ const startServer = async () => {
     await initializeGeofences();
   } catch (err) {
     console.error('Failed to initialize geofences tables:', err.message);
+  }
+
+  try {
+    await migrateGeofenceEvents();
+  } catch (err) {
+    console.error('Failed to migrate geofence_events table:', err.message);
   }
 
   try {

@@ -3,6 +3,7 @@ import 'map_screen.dart';
 import 'history_screen.dart';
 import 'attendance_screen.dart';
 import 'geofence_screen.dart';
+import 'events_screen.dart';
 import 'admin_control_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -31,15 +32,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
       HistoryScreen(token: widget.token),
       AttendanceScreen(token: widget.token),
       GeofenceScreen(token: widget.token),
+      EventsScreen(token: widget.token),
       AdminControlScreen(token: widget.token),
     ];
   }
+
+  // Index of the Admin screen within _screens / _navItems.
+  static const _adminIndex = 5;
 
   static const _navItems = [
     _NavItem(Icons.map_outlined, Icons.map, 'Live Map'),
     _NavItem(Icons.history, Icons.history, 'History'),
     _NavItem(Icons.today_outlined, Icons.today, 'Attendance'),
     _NavItem(Icons.fence_outlined, Icons.fence, 'Geofences'),
+    _NavItem(Icons.event_note_outlined, Icons.event_note, 'Events'),
     _NavItem(Icons.admin_panel_settings_outlined, Icons.admin_panel_settings, 'Admin'),
   ];
 
@@ -98,8 +104,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
         _AppBarAction(
           icon: Icons.admin_panel_settings_outlined,
           tooltip: 'Admin Control',
-          selected: _selectedIndex == 4,
-          onTap: () => setState(() => _selectedIndex = 4),
+          selected: _selectedIndex == _adminIndex,
+          onTap: () => setState(() => _selectedIndex = _adminIndex),
         ),
         const SizedBox(width: 4),
         IconButton(

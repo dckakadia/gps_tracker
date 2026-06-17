@@ -1,0 +1,205 @@
+import 'package:flutter/material.dart';
+import '../services/api_service.dart';
+import '../theme/app_theme.dart';
+
+class EventsScreen extends StatefulWidget {
+  final String token;
+  const EventsScreen({required this.token});
+
+  @override
+  _EventsScreenState createState() => _EventsScreenState();
+}
+
+class _EventsScreenState extends State<EventsScreen> {
+  DateTime _selectedDate = DateTime.now();
+  bool _loading = false;
+  List<Map<String, dynamic>> _events = [];
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadEvents());
+  }
+
+  Future<void> _loadEvents() async {
+    if (!mounted) return;
+    setState(() { _loading = true; _error = null; });
+    final dateStr = _selectedDate.toIso8601String().split('T')[0];
+    try {
+      final data = await ApiService.getGeofenceEvents(widget.token, date: dateStr);
+      if (!mounted) return;
+      setState(() { _events = data; _loading = false; });
+    } catch (err) {
+      if (!mounted) return;
+      setState(() { _error = err.toString(); _loading = false; });
+    }
+  }
+
+  String _formatTime(String? isoString) {
+    if (isoString == null) return '--';
+    try {
+      final dt = DateTime.parse(isoString).toLocal();
+      return '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+    } catch (_) { return '--'; }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // ── Header bar ────────────────────────────────────────────────
+        Container(
+          color: AppTheme.surface,
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+          child: Row(
+            children: [
+              const Icon(Icons.event_note, size: 20, color: AppTheme.primaryLight),
+              const SizedBox(width: 10),
+              const Text('Events', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: AppTheme.textDark)),
+              const SizedBox(width: 16),
+              OutlinedButton.icon(
+                icon: const Icon(Icons.calendar_today, size: 14),
+                label: Text(_selectedDate.toIso8601String().split('T')[0],
+                    style: const TextStyle(fontSize: 13)),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppTheme.primaryLight,
+                  side: const BorderSide(color: AppTheme.border),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppTheme.radiusSm)),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                ),
+                onPressed: () async {
+                  final picked = await showDatePicker(
+                    context: context,
+                    initialDate: _selectedDate,
+                    firstDate: DateTime(2020),
+                    lastDate: DateTime.now(),
+                  );
+                  if (picked != null) {
+                    setState(() => _selectedDate = picked);
+                    _loadEvents();
+                  }
+                },
+              ),
+              const SizedBox(width: 8),
+              ElevatedButton.icon(
+                icon: const Icon(Icons.refresh, size: 15),
+                label: const Text('Refresh'),
+                onPressed: _loading ? null : _loadEvents,
+              ),
+              const Spacer(),
+              if (!_loading && _events.isNotEmpty)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: AppTheme.successLight,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text('${_events.length} events',
+                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.success)),
+                ),
+            ],
+          ),
+        ),
+        const Divider(height: 1),
+
+        // ── Content ───────────────────────────────────────────────────
+        Expanded(child: _buildContent()),
+      ],
+    );
+  }
+
+  Widget _buildContent() {
+    if (_loading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (_error != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.error_outline, color: AppTheme.error, size: 40),
+              const SizedBox(height: 12),
+              const Text('Failed to load events', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 6),
+              Text(_error!, style: const TextStyle(color: AppTheme.textMedium, fontSize: 13), textAlign: TextAlign.center),
+              const SizedBox(height: 16),
+              ElevatedButton.icon(
+                icon: const Icon(Icons.refresh, size: 15),
+                label: const Text('Retry'),
+                onPressed: _loadEvents,
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (_events.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 64, height: 64,
+              decoration: const BoxDecoration(color: AppTheme.background, shape: BoxShape.circle),
+              child: const Icon(Icons.event_busy_outlined, size: 32, color: AppTheme.textLight),
+            ),
+            const SizedBox(height: 14),
+            const Text('No events', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: AppTheme.textDark)),
+            const SizedBox(height: 6),
+            Text('No geofence events for ${_selectedDate.toIso8601String().split('T')[0]}',
+                style: const TextStyle(fontSize: 13, color: AppTheme.textMedium)),
+          ],
+        ),
+      );
+    }
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Card(
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: DataTable(
+            headingRowColor: WidgetStateProperty.all(AppTheme.background),
+            headingTextStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: AppTheme.textDark),
+            dataTextStyle: const TextStyle(fontSize: 13, color: AppTheme.textDark),
+            columns: const [
+              DataColumn(label: Text('Salesperson')),
+              DataColumn(label: Text('Geofence')),
+              DataColumn(label: Text('Event')),
+              DataColumn(label: Text('Time')),
+            ],
+            rows: _events.map((e) {
+              final eventType = (e['event_type'] as String?) ?? '';
+              final isEnter = eventType == 'enter';
+              return DataRow(cells: [
+                DataCell(Text(e['user_name'] ?? '--', style: const TextStyle(fontWeight: FontWeight.w600))),
+                DataCell(Text(e['geofence_name'] ?? '--')),
+                DataCell(Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: isEnter ? AppTheme.successLight : AppTheme.warningLight,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    isEnter ? 'Enter' : 'Exit',
+                    style: TextStyle(
+                      fontSize: 11, fontWeight: FontWeight.w600,
+                      color: isEnter ? AppTheme.success : AppTheme.warning,
+                    ),
+                  ),
+                )),
+                DataCell(Text(_formatTime(e['occurred_at'] as String?))),
+              ]);
+            }).toList(),
+          ),
+        ),
+      ),
+    );
+  }
+}
