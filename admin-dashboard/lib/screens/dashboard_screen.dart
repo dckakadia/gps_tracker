@@ -1,16 +1,14 @@
 import 'package:flutter/material.dart';
 import 'map_screen.dart';
-import 'users_screen.dart';
-import 'backup_screen.dart';
 import 'history_screen.dart';
 import 'attendance_screen.dart';
 import 'geofence_screen.dart';
-import 'app_management_screen.dart';
+import 'admin_control_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   final String token;
   final int initialIndex;
-  const DashboardScreen({required this.token, this.initialIndex = 1});
+  const DashboardScreen({required this.token, this.initialIndex = 0});
 
   @override
   _DashboardScreenState createState() => _DashboardScreenState();
@@ -29,23 +27,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   static const _navItems = [
-    _NavItem(Icons.people_alt_outlined, Icons.people_alt, 'Users'),
     _NavItem(Icons.map_outlined, Icons.map, 'Live Map'),
     _NavItem(Icons.history, Icons.history, 'History'),
     _NavItem(Icons.today_outlined, Icons.today, 'Attendance'),
     _NavItem(Icons.fence_outlined, Icons.fence, 'Geofences'),
-    _NavItem(Icons.backup_outlined, Icons.backup, 'Backup'),
-    _NavItem(Icons.phone_android_outlined, Icons.phone_android, 'App'),
+    _NavItem(Icons.admin_panel_settings_outlined, Icons.admin_panel_settings, 'Admin'),
   ];
 
   List<Widget> get _screens => [
-    UsersScreen(token: widget.token),
     MapScreen(token: widget.token),
     HistoryScreen(token: widget.token),
     AttendanceScreen(token: widget.token),
     GeofenceScreen(token: widget.token),
-    BackupScreen(token: widget.token),
-    AppManagementScreen(token: widget.token),
+    AdminControlScreen(token: widget.token),
   ];
 
   @override
@@ -101,10 +95,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
       ),
       actions: [
         _AppBarAction(
-          icon: Icons.phone_android_outlined,
-          tooltip: 'App Management',
-          selected: _selectedIndex == 6,
-          onTap: () => setState(() => _selectedIndex = 6),
+          icon: Icons.admin_panel_settings_outlined,
+          tooltip: 'Admin Control',
+          selected: _selectedIndex == 4,
+          onTap: () => setState(() => _selectedIndex = 4),
         ),
         const SizedBox(width: 4),
         IconButton(

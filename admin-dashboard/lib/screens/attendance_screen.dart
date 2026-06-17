@@ -93,38 +93,69 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
               SizedBox(width: 8),
               ElevatedButton(
                 onPressed: _loading ? null : _loadAttendance,
-                child: _loading
-                    ? SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                    : Text('Refresh'),
+                child: Text('Refresh'),
               ),
             ],
           ),
           SizedBox(height: 12),
-          if (_error != null)
-            Text(_error!, style: TextStyle(color: Colors.red)),
-          if (!_loading && _error == null)
-            Expanded(
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: DataTable(
-                  columns: const [
-                    DataColumn(label: Text('Name', style: TextStyle(fontWeight: FontWeight.bold))),
-                    DataColumn(label: Text('Check-In', style: TextStyle(fontWeight: FontWeight.bold))),
-                    DataColumn(label: Text('Check-Out', style: TextStyle(fontWeight: FontWeight.bold))),
-                    DataColumn(label: Text('Hours in Field', style: TextStyle(fontWeight: FontWeight.bold))),
-                  ],
-                  rows: _attendance.map((a) {
-                    return DataRow(cells: [
-                      DataCell(Text(a['name'] ?? '--')),
-                      DataCell(Text(_formatTime(a['check_in'] as String?))),
-                      DataCell(Text(_formatTime(a['check_out'] as String?))),
-                      DataCell(Text(_formatHours(a['hours']))),
-                    ]);
-                  }).toList(),
-                ),
-              ),
-            ),
+          Expanded(
+            child: _buildContent(),
+          ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildContent() {
+    if (_loading) {
+      return Center(child: CircularProgressIndicator());
+    }
+    if (_error != null) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.error_outline, color: Colors.red, size: 40),
+            SizedBox(height: 8),
+            Text(_error!, style: TextStyle(color: Colors.red)),
+            SizedBox(height: 12),
+            ElevatedButton(onPressed: _loadAttendance, child: Text('Retry')),
+          ],
+        ),
+      );
+    }
+    if (_attendance.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.event_busy, size: 48, color: Colors.grey),
+            SizedBox(height: 12),
+            Text(
+              'No attendance records for ${_selectedDate.toIso8601String().split('T')[0]}',
+              style: TextStyle(color: Colors.grey[600]),
+            ),
+          ],
+        ),
+      );
+    }
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: DataTable(
+        columns: const [
+          DataColumn(label: Text('Name', style: TextStyle(fontWeight: FontWeight.bold))),
+          DataColumn(label: Text('Check-In', style: TextStyle(fontWeight: FontWeight.bold))),
+          DataColumn(label: Text('Check-Out', style: TextStyle(fontWeight: FontWeight.bold))),
+          DataColumn(label: Text('Hours in Field', style: TextStyle(fontWeight: FontWeight.bold))),
+        ],
+        rows: _attendance.map((a) {
+          return DataRow(cells: [
+            DataCell(Text(a['name'] ?? '--')),
+            DataCell(Text(_formatTime(a['check_in'] as String?))),
+            DataCell(Text(_formatTime(a['check_out'] as String?))),
+            DataCell(Text(_formatHours(a['hours']))),
+          ]);
+        }).toList(),
       ),
     );
   }

@@ -20,3 +20,9 @@ admin-dashboard/build
 # OS
 .DS_Store
 Thumbs.db
+
+# Claude Code internal
+.claude/
+
+# APK binaries
+server/uploads/apks/*.apk
