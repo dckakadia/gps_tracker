@@ -270,6 +270,55 @@ router.get('/history/:userId', authorize, requireAdmin, async (req, res) => {
   }
 });
 
+function csvEscape(value) {
+  if (value === null || value === undefined) return '';
+  const str = String(value);
+  if (/[",\n]/.test(str)) {
+    return '"' + str.replace(/"/g, '""') + '"';
+  }
+  return str;
+}
+
+router.get('/history/:userId/export', authorize, requireAdmin, async (req, res) => {
+  const userId = parseInt(req.params.userId, 10);
+  if (isNaN(userId)) {
+    return res.status(400).json({ error: 'Invalid user ID' });
+  }
+  const date = req.query.date || new Date().toISOString().split('T')[0];
+  const dayStart = new Date(date + 'T00:00:00.000Z');
+  const dayEnd = new Date(dayStart.getTime() + 86400000);
+
+  try {
+    // Note: accuracy is not persisted on the locations table, so that column is
+    // included for the requested format but left empty.
+    const queryText = `SELECT recorded_at, latitude, longitude
+                       FROM locations
+                       WHERE user_id = $1
+                       AND recorded_at >= $2
+                       AND recorded_at < $3
+                       ORDER BY recorded_at ASC`;
+    const result = await query(queryText, [userId, dayStart.toISOString(), dayEnd.toISOString()]);
+
+    const lines = ['Timestamp,Latitude,Longitude,Accuracy'];
+    for (const row of result.rows) {
+      lines.push([
+        csvEscape(row.recorded_at),
+        csvEscape(row.latitude),
+        csvEscape(row.longitude),
+        '',
+      ].join(','));
+    }
+    const csv = lines.join('\n');
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="location-history-${userId}-${date}.csv"`);
+    return res.send(csv);
+  } catch (err) {
+    console.error('Export location history error', err);
+    return res.status(500).json({ error: 'Unable to export location history' });
+  }
+});
+
 router.get('/stats/distance', authorize, requireAdmin, async (req, res) => {
   const { user_id, date } = req.query;
   if (!user_id || !date) {

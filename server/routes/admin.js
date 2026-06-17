@@ -132,4 +132,47 @@ router.get('/attendance', async (req, res) => {
   }
 });
 
+function csvEscape(value) {
+  if (value === null || value === undefined) return '';
+  const str = String(value);
+  if (/[",\n]/.test(str)) {
+    return '"' + str.replace(/"/g, '""') + '"';
+  }
+  return str;
+}
+
+router.get('/attendance/export', async (req, res) => {
+  const date = req.query.date || new Date().toISOString().split('T')[0];
+  try {
+    const result = await query(
+      `SELECT u.id, u.name, a.check_in, a.check_out,
+         EXTRACT(EPOCH FROM (a.check_out - a.check_in))/3600 AS hours
+       FROM users u
+       LEFT JOIN attendance a ON a.user_id = u.id AND a.date = $1::date
+       WHERE u.role = 'salesperson'
+       ORDER BY u.name`,
+      [date]
+    );
+
+    const header = ['Name', 'Check In', 'Check Out', 'Hours'];
+    const lines = [header.join(',')];
+    for (const row of result.rows) {
+      lines.push([
+        csvEscape(row.name),
+        csvEscape(row.check_in),
+        csvEscape(row.check_out),
+        csvEscape(row.hours != null ? Number(row.hours).toFixed(2) : ''),
+      ].join(','));
+    }
+    const csv = lines.join('\n');
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="attendance-${date}.csv"`);
+    return res.send(csv);
+  } catch (err) {
+    console.error('Export attendance error', err);
+    return res.status(500).json({ error: 'Unable to export attendance' });
+  }
+});
+
 export default router;

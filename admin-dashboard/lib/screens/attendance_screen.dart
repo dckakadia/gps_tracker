@@ -1,3 +1,6 @@
+// ignore: avoid_web_libraries_in_flutter
+import 'dart:html' as html;
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
 import '../theme/app_theme.dart';
@@ -34,6 +37,13 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       if (!mounted) return;
       setState(() { _error = err.toString(); _loading = false; });
     }
+  }
+
+  void _exportCsv() {
+    if (!kIsWeb) return;
+    final dateStr = _selectedDate.toIso8601String().split('T')[0];
+    final url = '${ApiService.baseUrl}/admin/attendance/export?date=$dateStr&token=${widget.token}';
+    html.window.open(url, '_blank');
   }
 
   String _formatTime(String? isoString) {
@@ -102,6 +112,18 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                 icon: const Icon(Icons.refresh, size: 15),
                 label: const Text('Refresh'),
                 onPressed: _loading ? null : _loadAttendance,
+              ),
+              const SizedBox(width: 8),
+              OutlinedButton.icon(
+                icon: const Icon(Icons.download, size: 15),
+                label: const Text('Export CSV'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppTheme.primaryLight,
+                  side: const BorderSide(color: AppTheme.border),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppTheme.radiusSm)),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                ),
+                onPressed: (_loading || _attendance.isEmpty) ? null : _exportCsv,
               ),
               const Spacer(),
               // Summary chip

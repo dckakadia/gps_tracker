@@ -1,5 +1,8 @@
 import 'dart:async';
 import 'dart:ui' as ui;
+// ignore: avoid_web_libraries_in_flutter
+import 'dart:html' as html;
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -169,6 +172,14 @@ class _HistoryScreenState extends State<HistoryScreen> {
   String _formatDate(DateTime d) =>
       '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
 
+  void _exportCsv() {
+    if (!kIsWeb || _selectedUser == null) return;
+    final dateStr = _selectedDate.toIso8601String().split('T')[0];
+    final url =
+        '${ApiService.baseUrl}/locations/history/${_selectedUser!.id}/export?date=$dateStr&token=${widget.token}';
+    html.window.open(url, '_blank');
+  }
+
   @override
   Widget build(BuildContext context) {
     final isMobile = MediaQuery.of(context).size.width < 600;
@@ -193,6 +204,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
                       Expanded(child: _datePicker()),
                       const SizedBox(width: 8),
                       _loadButton(),
+                      const SizedBox(width: 8),
+                      _exportButton(),
                     ]),
                   ],
                 )
@@ -202,6 +215,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
                   _datePicker(),
                   const SizedBox(width: 12),
                   _loadButton(),
+                  const SizedBox(width: 12),
+                  _exportButton(),
                 ]),
         ),
         const Divider(height: 1),
@@ -532,6 +547,22 @@ class _HistoryScreenState extends State<HistoryScreen> {
             : const Icon(Icons.route, size: 18),
         label: const Text('Load Route'),
         onPressed: (_loading || _selectedUser == null) ? null : _loadHistory,
+      ),
+    );
+  }
+
+  Widget _exportButton() {
+    return SizedBox(
+      height: 44,
+      child: OutlinedButton.icon(
+        icon: const Icon(Icons.download, size: 18),
+        label: const Text('Export CSV'),
+        style: OutlinedButton.styleFrom(
+          foregroundColor: AppTheme.primaryLight,
+          side: const BorderSide(color: AppTheme.border),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppTheme.radiusSm)),
+        ),
+        onPressed: (_points.isEmpty) ? null : _exportCsv,
       ),
     );
   }
