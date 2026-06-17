@@ -5,8 +5,11 @@ import android.app.ActivityManager
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.location.LocationManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
+import android.provider.Settings
 import android.view.View
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
@@ -24,13 +27,13 @@ import java.util.Timer
 class MainActivity : AppCompatActivity() {
     private val LOCATION_PERMISSION_REQUEST_CODE = 100
     private var locationManager: LocationManager? = null
-    private var locationListener: LocationListener? = null
     private var updateTimer: Timer? = null
     private lateinit var authStatusText: TextView
     private lateinit var authBanner: View
     private lateinit var authRetryButton: MaterialButton
     private lateinit var btnUpdate: MaterialButton
     private var pendingUpdateInfo: UpdateChecker.VersionInfo? = null
+    private var batteryBannerDismissed = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -52,6 +55,15 @@ class MainActivity : AppCompatActivity() {
         authRetryButton = findViewById(R.id.authRetryButton)
         authRetryButton.setOnClickListener {
             startActivity(Intent(this, LoginActivity::class.java))
+        }
+
+        // Battery optimization warning banner
+        findViewById<View>(R.id.batteryBanner).setOnClickListener {
+            requestIgnoreBatteryOptimizations()
+        }
+        findViewById<TextView>(R.id.batteryBannerDismiss).setOnClickListener {
+            batteryBannerDismissed = true
+            findViewById<View>(R.id.batteryBanner).visibility = View.GONE
         }
 
         // Show current version in header. Long-press opens the hidden debug screen.
@@ -197,6 +209,24 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         updateAuthStatus()
+        updateBatteryBanner()
+    }
+
+    private fun updateBatteryBanner() {
+        val pm = getSystemService(POWER_SERVICE) as PowerManager
+        val ignoring = pm.isIgnoringBatteryOptimizations(packageName)
+        val banner = findViewById<View>(R.id.batteryBanner)
+        banner.visibility = if (!ignoring && !batteryBannerDismissed) View.VISIBLE else View.GONE
+    }
+
+    private fun requestIgnoreBatteryOptimizations() {
+        try {
+            val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+            intent.data = Uri.parse("package:$packageName")
+            startActivity(intent)
+        } catch (e: Exception) {
+            android.util.Log.e("MainActivity", "Could not open battery optimization settings: ${e.message}")
+        }
     }
 
     override fun onDestroy() {
