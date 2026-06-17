@@ -136,7 +136,7 @@ class _UsersTabState extends State<_UsersTab> {
                 TextField(
                   controller: editPassword,
                   decoration: InputDecoration(
-                    labelText: 'New Password',
+                    labelText: 'New password (leave blank to keep current)',
                     hintText: 'Leave blank to keep current password',
                     suffixIcon: IconButton(
                       icon: Icon(showPassword ? Icons.visibility : Icons.visibility_off),

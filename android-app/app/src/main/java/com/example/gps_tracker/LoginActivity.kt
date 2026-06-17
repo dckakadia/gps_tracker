@@ -115,7 +115,16 @@ class LoginActivity : AppCompatActivity() {
                     refreshTokenStatus()
                     startTrackingService()
                 } else {
-                    displayError(loginResult.error ?: "Login failed")
+                    // Distinguish a reachability problem from rejected credentials.
+                    val message = when {
+                        loginResult.networkError ->
+                            "Can't reach server — check your connection"
+                        loginResult.statusCode == 401 ->
+                            "Incorrect email or password"
+                        else ->
+                            loginResult.error ?: "Login failed"
+                    }
+                    displayError(message)
                 }
             }
         }

@@ -122,6 +122,16 @@
 
             </com.google.android.material.textfield.TextInputLayout>
 
+            <!-- Forgot password hint -->
+            <TextView
+                android:id="@+id/forgotPasswordText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Forgot password? Contact your admin."
+                android:textColor="@color/text_light"
+                android:textSize="12sp"
+                android:layout_marginBottom="8dp" />
+
             <!-- Error Text -->
             <TextView
                 android:id="@+id/errorText"

@@ -49,22 +49,30 @@ object ApiClient {
                 client.newCall(request).execute().use { response ->
                     val responseBody = response.body?.string()
                     if (!response.isSuccessful || responseBody == null) {
-                        return@withContext LoginResult(false, null, null, "Invalid credentials or network error")
+                        return@withContext LoginResult(
+                            false, null, null,
+                            "Login failed",
+                            statusCode = response.code
+                        )
                     }
                     val parsed = mapAdapter.fromJson(responseBody)
                     val token = parsed?.get("token") as? String
                     val refreshToken = parsed?.get("refreshToken") as? String
                     val error = parsed?.get("error") as? String
                     return@withContext if (token != null) {
-                        LoginResult(true, token, refreshToken, null)
+                        LoginResult(true, token, refreshToken, null, statusCode = response.code)
                     } else {
-                        LoginResult(false, null, null, error ?: "Login failed")
+                        LoginResult(false, null, null, error ?: "Login failed", statusCode = response.code)
                     }
                 }
             } catch (err: Exception) {
                 android.util.Log.e("ApiClient", "Login exception", err)
                 err.printStackTrace()
-                return@withContext LoginResult(false, null, null, err.message ?: "Network error")
+                return@withContext LoginResult(
+                    false, null, null,
+                    err.message ?: "Network error",
+                    networkError = true
+                )
             }
         }
     }
@@ -282,5 +290,17 @@ object ApiClient {
         }
     }
 
-    data class LoginResult(val success: Boolean, val token: String?, val refreshToken: String?, val error: String?)
+    /**
+     * [statusCode] carries the HTTP response code on a server response, or null when the
+     * request never reached the server (network error / timeout). Callers use this to tell
+     * bad-credential failures (401) apart from connectivity problems.
+     */
+    data class LoginResult(
+        val success: Boolean,
+        val token: String?,
+        val refreshToken: String?,
+        val error: String?,
+        val statusCode: Int? = null,
+        val networkError: Boolean = false
+    )
 }
