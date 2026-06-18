@@ -213,22 +213,25 @@ router.post('/', uploadLimiter, authorize, async (req, res) => {
 router.get('/latest', authorize, requireAdmin, async (req, res) => {
   const includeStale = req.query.include_stale === 'true';
   try {
-    const timeFilter = includeStale ? '' : "AND recorded_at >= NOW() - INTERVAL '10 minutes'";
+    // DISTINCT ON (u.id) picks exactly one row per user — the one with the latest
+    // recorded_at, using id DESC as tiebreaker when timestamps are identical.
+    // This replaces the MAX(recorded_at) subquery join which returned duplicate rows
+    // when a batch was uploaded multiple times with the same recorded_at timestamp.
+    const timeFilter = includeStale ? '' : "AND l.recorded_at >= NOW() - INTERVAL '10 minutes'";
     const queryText = `
-      SELECT u.id AS user_id, u.name AS name, u.email AS email,
-             l.latitude, l.longitude, l.recorded_at, l.received_at,
-             (l.recorded_at >= NOW() - INTERVAL '10 minutes') AS is_live,
-             l.battery_level
-      FROM users u
-      INNER JOIN locations l ON l.user_id = u.id
-      INNER JOIN (
-        SELECT user_id, MAX(recorded_at) AS max_recorded_at
-        FROM locations
-        WHERE true ${timeFilter}
-        GROUP BY user_id
-      ) latest ON latest.user_id = l.user_id AND latest.max_recorded_at = l.recorded_at
-      WHERE u.role != $1
-      ORDER BY u.name
+      SELECT * FROM (
+        SELECT DISTINCT ON (u.id)
+               u.id AS user_id, u.name AS name, u.email AS email,
+               l.latitude, l.longitude, l.recorded_at, l.received_at,
+               (l.recorded_at >= NOW() - INTERVAL '10 minutes') AS is_live,
+               l.battery_level
+        FROM users u
+        INNER JOIN locations l ON l.user_id = u.id
+        WHERE u.role != $1
+          ${timeFilter}
+        ORDER BY u.id, l.recorded_at DESC, l.id DESC
+      ) sub
+      ORDER BY name
     `;
     const result = await query(queryText, ['admin']);
     console.info('Fetch latest locations', { includeStale, count: result.rows.length });

@@ -16,6 +16,8 @@ class BootReceiver : BroadcastReceiver() {
             } catch (e: Exception) {
                 android.util.Log.e("BootReceiver", "Failed to start TrackingService: ${e.message}", e)
             }
+            // Re-schedule watchdog so it survives reboots
+            ServiceWatchdogWorker.schedule(context)
         }
     }
 }

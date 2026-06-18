@@ -14,6 +14,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import kotlin.concurrent.timer
 import java.util.Timer
+import java.util.Locale
 
 /**
  * Hidden diagnostics screen. Shows raw GPS coordinates, request counters and the
@@ -105,6 +106,49 @@ class DebugActivity : AppCompatActivity() {
             ServerStats.successfulRequests.toString()
         findViewById<TextView>(R.id.tvTotalCount).text =
             ServerStats.totalRequests.toString()
+        updateTrackingStatePanel()
+    }
+
+    private fun updateTrackingStatePanel() {
+        val stateView     = findViewById<TextView>(R.id.tvTrackingState)
+        val sensorView    = findViewById<TextView>(R.id.tvMotionSensor)
+        val heartbeatView = findViewById<TextView>(R.id.tvNextHeartbeat)
+
+        val state = TrackingService.currentState
+
+        stateView.text = when (state) {
+            TrackingService.State.MOVING      -> "MOVING  (GPS active, 30 s interval)"
+            TrackingService.State.STATIONARY  -> "STANDBY  (GPS off, accelerometer armed)"
+        }
+        stateView.setTextColor(when (state) {
+            TrackingService.State.MOVING     -> Color.parseColor("#2E7D32")
+            TrackingService.State.STATIONARY -> Color.parseColor("#E65100")
+        })
+
+        val available = TrackingService.isMotionSensorAvailable
+        sensorView.text = when {
+            !available                       -> "Not available on this device"
+            state == TrackingService.State.STATIONARY -> "Armed  (TYPE_SIGNIFICANT_MOTION)"
+            else                             -> "Standby  (disarmed while moving)"
+        }
+        sensorView.setTextColor(when {
+            !available                       -> Color.parseColor("#C62828")
+            state == TrackingService.State.STATIONARY -> Color.parseColor("#2E7D32")
+            else                             -> Color.parseColor("#1565C0")
+        })
+
+        val nextHb = TrackingService.nextHeartbeatAt
+        heartbeatView.text = if (nextHb == 0L || state == TrackingService.State.MOVING) {
+            "n/a  (only active in standby)"
+        } else {
+            val diffMs = nextHb - System.currentTimeMillis()
+            if (diffMs <= 0) "Overdue — pending network" else {
+                val h = diffMs / 3_600_000
+                val m = (diffMs % 3_600_000) / 60_000
+                val s = (diffMs % 60_000) / 1_000
+                String.format(Locale.US, "in %02d:%02d:%02d", h, m, s)
+            }
+        }
     }
 
     private fun refreshLogPanel() {

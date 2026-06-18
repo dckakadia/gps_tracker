@@ -3,6 +3,7 @@ package com.example.gps_tracker
 import android.Manifest
 import android.app.ActivityManager
 import android.content.Intent
+import android.content.res.ColorStateList
 import android.content.pm.PackageManager
 import android.location.LocationManager
 import android.net.Uri
@@ -26,6 +27,7 @@ import java.util.Timer
 
 class MainActivity : AppCompatActivity() {
     private val LOCATION_PERMISSION_REQUEST_CODE = 100
+    private val BACKGROUND_LOCATION_REQUEST_CODE = 101
     private var locationManager: LocationManager? = null
     private var updateTimer: Timer? = null
     private lateinit var authStatusText: TextView
@@ -102,31 +104,17 @@ class MainActivity : AppCompatActivity() {
             FcmTokenManager.registerToken(this)
         }
 
+        // Schedule watchdog to restart TrackingService if Samsung battery optimizer kills it
+        ServiceWatchdogWorker.schedule(this)
+
         // Initialize location manager
         locationManager = getSystemService(LOCATION_SERVICE) as LocationManager
 
         // Start updating UI every 2 seconds
         startUIRefresh()
 
-        // Auto-start tracking if permissions already granted
-        val requiredPermissions = mutableListOf(
-            Manifest.permission.ACCESS_FINE_LOCATION,
-            Manifest.permission.ACCESS_COARSE_LOCATION
-        )
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            requiredPermissions.add(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
-        }
-
-        val missingPermissions = requiredPermissions.filter {
-            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
-        }
-
-        if (missingPermissions.isEmpty()) {
-            android.util.Log.i("MainActivity", "Permissions already granted — auto-starting TrackingService")
-            startTrackingService()
-        } else {
-            android.util.Log.i("MainActivity", "Permissions missing on startup: $missingPermissions — not auto-starting service")
-        }
+        // Auto-start tracking if all permissions granted, or kick off the two-step request flow
+        ensureLocationPermissionsAndStart()
     }
 
     private fun startUIRefresh() {
@@ -142,14 +130,47 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateServiceStatus() {
         val isServiceRunning = isTrackingServiceRunning()
-        val statusText = if (isServiceRunning) "Tracking ON" else "Tracking OFF"
         val statusIndicator = findViewById<View>(R.id.statusIndicator)
-        val statusTextView = findViewById<TextView>(R.id.tvServiceStatus)
+        val statusTextView  = findViewById<TextView>(R.id.tvServiceStatus)
 
-        statusTextView.text = statusText
-        statusIndicator.setBackgroundResource(
-            if (isServiceRunning) R.drawable.status_indicator_green else R.drawable.status_indicator
-        )
+        if (!isServiceRunning) {
+            statusTextView.text = "Tracking OFF"
+            statusIndicator.setBackgroundResource(R.drawable.status_indicator)
+        } else {
+            statusIndicator.setBackgroundResource(R.drawable.status_indicator_green)
+            statusTextView.text = when (TrackingService.currentState) {
+                TrackingService.State.MOVING     -> "Tracking: Moving"
+                TrackingService.State.STATIONARY -> "Tracking: Standby"
+            }
+        }
+        updateStartButton(isServiceRunning)
+    }
+
+    private fun updateStartButton(isRunning: Boolean) {
+        val btn = findViewById<MaterialButton>(R.id.startTrackingButton)
+        when {
+            !isRunning -> {
+                btn.text = "START TRACKING"
+                btn.backgroundTintList = ColorStateList.valueOf(
+                    ContextCompat.getColor(this, R.color.success_green)
+                )
+                btn.setIconResource(android.R.drawable.ic_media_play)
+            }
+            TrackingService.currentState == TrackingService.State.STATIONARY -> {
+                btn.text = "STANDBY — GPS OFF"
+                btn.backgroundTintList = ColorStateList.valueOf(
+                    android.graphics.Color.parseColor("#FF9800")
+                )
+                btn.setIconResource(android.R.drawable.ic_lock_idle_lock)
+            }
+            else -> {
+                btn.text = "TRACKING ACTIVE ✓"
+                btn.backgroundTintList = ColorStateList.valueOf(
+                    ContextCompat.getColor(this, R.color.primary)
+                )
+                btn.setIconResource(android.R.drawable.ic_menu_mylocation)
+            }
+        }
     }
 
     private fun updateCheckIn() {
@@ -160,8 +181,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateOverallStatus() {
-        val statusView = findViewById<TextView>(R.id.tvOverallStatus)
-        val hasToken = AuthManager.hasToken(this)
+        val statusView       = findViewById<TextView>(R.id.tvOverallStatus)
+        val hasToken         = AuthManager.hasToken(this)
         val isServiceRunning = isTrackingServiceRunning()
 
         when {
@@ -172,6 +193,10 @@ class MainActivity : AppCompatActivity() {
             !isServiceRunning -> {
                 statusView.text = "Tap to fix — start tracking"
                 statusView.setTextColor(ContextCompat.getColor(this, R.color.error_red))
+            }
+            TrackingService.currentState == TrackingService.State.STATIONARY -> {
+                statusView.text = "Standby — GPS off, accelerometer armed"
+                statusView.setTextColor(android.graphics.Color.parseColor("#FF9800"))
             }
             else -> {
                 statusView.text = "All good ✓"
@@ -210,6 +235,11 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         updateAuthStatus()
         updateBatteryBanner()
+        // If the user just came back from the system Settings page after granting
+        // background location, start the service without requiring another tap.
+        if (!isTrackingServiceRunning()) {
+            ensureLocationPermissionsAndStart()
+        }
     }
 
     private fun updateBatteryBanner() {
@@ -252,37 +282,49 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun ensureLocationPermissionsAndStart() {
-        val requiredPermissions = mutableListOf(
-            Manifest.permission.ACCESS_FINE_LOCATION,
-            Manifest.permission.ACCESS_COARSE_LOCATION
-        )
+        val hasFine = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        val hasCoarse = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            requiredPermissions.add(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
-        }
-
-        val missingPermissions = requiredPermissions.filter {
-            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
-        }
-
-        if (missingPermissions.isEmpty()) {
-            android.util.Log.i("MainActivity", "All location permissions granted")
-            startTrackingService()
+        // Step 1 — foreground location (FINE + COARSE) must be granted first.
+        if (!hasFine && !hasCoarse) {
+            android.util.Log.i("MainActivity", "Requesting foreground location permissions")
+            ActivityCompat.requestPermissions(
+                this,
+                arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION),
+                LOCATION_PERMISSION_REQUEST_CODE
+            )
             return
         }
 
-        android.util.Log.i("MainActivity", "Requesting location permissions: $missingPermissions")
-        ActivityCompat.requestPermissions(
-            this,
-            missingPermissions.toTypedArray(),
-            LOCATION_PERMISSION_REQUEST_CODE
-        )
+        // Step 2 — on Android 10+, background location ("Allow all the time") must be requested
+        // in a SEPARATE requestPermissions call after foreground is granted.
+        // Combining them in one call causes Android 11+ to silently ignore the background request.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val hasBackground = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_BACKGROUND_LOCATION) == PackageManager.PERMISSION_GRANTED
+            if (!hasBackground) {
+                android.util.Log.i("MainActivity", "Requesting background location permission (Allow all the time)")
+                ActivityCompat.requestPermissions(
+                    this,
+                    arrayOf(Manifest.permission.ACCESS_BACKGROUND_LOCATION),
+                    BACKGROUND_LOCATION_REQUEST_CODE
+                )
+                return
+            }
+        }
+
+        android.util.Log.i("MainActivity", "All location permissions granted — starting TrackingService")
+        startTrackingService()
     }
 
     private fun startTrackingService() {
         try {
             ContextCompat.startForegroundService(this, Intent(this, TrackingService::class.java))
             android.util.Log.i("MainActivity", "TrackingService started successfully")
+            // Immediately upload last known location so the user appears online without waiting
+            val forceIntent = Intent(this, TrackingService::class.java).apply {
+                action = TrackingService.ACTION_FORCE_UPLOAD
+            }
+            startService(forceIntent)
         } catch (e: Exception) {
             android.util.Log.e("MainActivity", "Failed to start TrackingService: ${e.message}", e)
         }
@@ -296,11 +338,21 @@ class MainActivity : AppCompatActivity() {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         when (requestCode) {
             LOCATION_PERMISSION_REQUEST_CODE -> {
-                if (grantResults.isNotEmpty() && grantResults.all { it == PackageManager.PERMISSION_GRANTED }) {
-                    android.util.Log.i("MainActivity", "Location permissions granted")
+                val granted = grantResults.isNotEmpty() && grantResults.any { it == PackageManager.PERMISSION_GRANTED }
+                if (granted) {
+                    // Foreground granted — now run step 2 (background request) if needed
+                    android.util.Log.i("MainActivity", "Foreground location granted — checking background")
+                    ensureLocationPermissionsAndStart()
+                } else {
+                    android.util.Log.w("MainActivity", "Foreground location denied — tracking cannot start")
+                }
+            }
+            BACKGROUND_LOCATION_REQUEST_CODE -> {
+                if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                    android.util.Log.i("MainActivity", "Background location granted — starting TrackingService")
                     startTrackingService()
                 } else {
-                    android.util.Log.w("MainActivity", "Location permissions denied: ${permissions.joinToString()}")
+                    android.util.Log.w("MainActivity", "Background location denied — tracking will not work in background")
                 }
             }
         }

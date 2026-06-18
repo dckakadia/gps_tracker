@@ -5,6 +5,21 @@ import { sendNotification } from '../services/fcm.js';
 
 const router = express.Router();
 
+// POST /api/users/fcm-token — save FCM token for the authenticated user (any role)
+router.post('/fcm-token', authorize, async (req, res) => {
+  const { fcm_token } = req.body;
+  if (!fcm_token) {
+    return res.status(400).json({ error: 'fcm_token is required' });
+  }
+  try {
+    await query('UPDATE users SET fcm_token = $1 WHERE id = $2', [fcm_token, req.user.id]);
+    return res.json({ message: 'FCM token saved' });
+  } catch (err) {
+    console.error('Save FCM token error', err);
+    return res.status(500).json({ error: 'Unable to save FCM token' });
+  }
+});
+
 router.use(authorize, requireAdmin);
 
 // GET /api/users/status
@@ -22,21 +37,6 @@ router.get('/status', async (req, res) => {
   } catch (err) {
     console.error('Fetch users status error', err);
     return res.status(500).json({ error: 'Unable to fetch users status' });
-  }
-});
-
-// POST /api/users/fcm-token — save FCM token for the authenticated user
-router.post('/fcm-token', async (req, res) => {
-  const { fcm_token } = req.body;
-  if (!fcm_token) {
-    return res.status(400).json({ error: 'fcm_token is required' });
-  }
-  try {
-    await query('UPDATE users SET fcm_token = $1 WHERE id = $2', [fcm_token, req.user.id]);
-    return res.json({ message: 'FCM token saved' });
-  } catch (err) {
-    console.error('Save FCM token error', err);
-    return res.status(500).json({ error: 'Unable to save FCM token' });
   }
 });
 
