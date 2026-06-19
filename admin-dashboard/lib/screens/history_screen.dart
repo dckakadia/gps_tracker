@@ -438,6 +438,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                   options: MapOptions(
                     center: const LatLng(20, 0),
                     zoom: 5,
+                    maxZoom: 19,
                     onMapEvent: (event) {
                       if (event is MapEventMove) _currentZoom = event.targetZoom;
                     },
@@ -446,6 +447,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                     TileLayer(
                       urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                       userAgentPackageName: 'com.example.gps_tracker',
+                      maxZoom: 19,
                     ),
                     PolylineLayer(polylines: [
                       Polyline(
