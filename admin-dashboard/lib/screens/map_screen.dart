@@ -585,7 +585,7 @@ class _MapScreenState extends State<MapScreen> {
             ? LatLng(filteredLocations.first.latitude, filteredLocations.first.longitude)
             : const LatLng(20, 0),
         zoom: 5,
-        maxZoom: 22,
+        maxZoom: 19,
         // Detect manual map interaction to pause auto-camera.
         // flutter_map v5.0.0 API note:
         //   MapEventMove covers onDrag (drag pan) and onMultiFinger (pinch pan/zoom).
@@ -617,10 +617,9 @@ class _MapScreenState extends State<MapScreen> {
         TileLayer(
           urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
           userAgentPackageName: 'com.example.gps_tracker',
-          // OSM tiles are available up to zoom 19; above that, scale zoom-19 tiles
-          // up instead of requesting non-existent tiles (which render blank).
-          maxNativeZoom: 19,
-          maxZoom: 22,
+          // OSM native tiles go up to zoom 19. Matching maxZoom here to MapOptions
+          // maxZoom prevents _outsideZoomLimits from bailing out before loading.
+          maxZoom: 19,
         ),
         // Geofence circles
         CircleLayer(
