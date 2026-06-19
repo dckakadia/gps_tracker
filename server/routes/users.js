@@ -20,6 +20,25 @@ router.post('/fcm-token', authorize, async (req, res) => {
   }
 });
 
+// GET /api/users/me/attendance — today's check-in/check-out for the authenticated user
+router.get('/me/attendance', authorize, async (req, res) => {
+  const userId = req.user.id;
+  const today = new Date().toISOString().split('T')[0];
+  try {
+    const result = await query(
+      'SELECT check_in, check_out FROM attendance WHERE user_id = $1 AND date = $2',
+      [userId, today]
+    );
+    if (result.rows.length === 0) {
+      return res.json({ check_in: null, check_out: null });
+    }
+    return res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Fetch own attendance error', err);
+    return res.status(500).json({ error: 'Unable to fetch attendance' });
+  }
+});
+
 router.use(authorize, requireAdmin);
 
 // GET /api/users/status

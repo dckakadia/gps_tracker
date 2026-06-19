@@ -20,9 +20,15 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AlertDialog
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import com.google.android.material.button.MaterialButton
-import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import com.google.android.material.button.MaterialButton
 import kotlin.concurrent.timer
 import java.util.Timer
 
@@ -32,6 +38,8 @@ class MainActivity : AppCompatActivity() {
     private val LOCATION_PERMISSION_REQUEST_CODE = 100
     private val BACKGROUND_LOCATION_REQUEST_CODE = 101
     private val NOTIFICATION_PERMISSION_REQUEST_CODE = 102
+    private val activityScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private var checkInIso: String? = null
     private var locationManager: LocationManager? = null
     private var updateTimer: Timer? = null
     private lateinit var authStatusText: TextView
@@ -89,20 +97,22 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        // Notification inbox
+        findViewById<com.google.android.material.button.MaterialButton>(R.id.btnNotifications)
+            .setOnClickListener { showNotificationInbox() }
+
         createNotificationChannel()
         requestNotificationPermission()
 
         updateAuthStatus()
 
         // Check for updates silently in background
-        GlobalScope.launch {
-            val info = UpdateChecker.checkForUpdate(this@MainActivity)
+        activityScope.launch {
+            val info = withContext(Dispatchers.IO) { UpdateChecker.checkForUpdate(this@MainActivity) }
             if (info != null) {
                 pendingUpdateInfo = info
-                runOnUiThread {
-                    btnUpdate.visibility = View.VISIBLE
-                    UpdateChecker.showUpdateDialog(this@MainActivity, info)
-                }
+                btnUpdate.visibility = View.VISIBLE
+                UpdateChecker.showUpdateDialog(this@MainActivity, info)
             }
         }
 
@@ -181,10 +191,67 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateCheckIn() {
-        // TODO: no check-in endpoint exists yet. Once a server endpoint is added,
-        // populate today's check-in time and compute elapsed hours from it.
-        findViewById<TextView>(R.id.tvCheckIn).text = "Check-in: —"
-        findViewById<TextView>(R.id.tvElapsed).text = "Elapsed: —"
+        val iso = checkInIso
+        if (iso == null) {
+            // Fetch once per session if logged in
+            if (AuthManager.hasToken(this) && checkInIso == null) {
+                activityScope.launch {
+                    val result = withContext(Dispatchers.IO) {
+                        ApiClient.getTodayAttendance(this@MainActivity)
+                    }
+                    result?.checkIn?.let { checkInIso = it }
+                    refreshCheckInUI()
+                }
+            }
+            return
+        }
+        refreshCheckInUI()
+    }
+
+    private fun refreshCheckInUI() {
+        val iso = checkInIso ?: run {
+            findViewById<TextView>(R.id.tvCheckIn).text = "Check-in: —"
+            findViewById<TextView>(R.id.tvElapsed).text = "Elapsed: —"
+            return
+        }
+        try {
+            val fmt = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).also {
+                it.timeZone = java.util.TimeZone.getTimeZone("UTC")
+            }
+            val checkInDate = fmt.parse(iso) ?: return
+            val localFmt = SimpleDateFormat("hh:mm a", Locale.US)
+            val elapsedMs = System.currentTimeMillis() - checkInDate.time
+            val hours = (elapsedMs / 3_600_000).toInt()
+            val minutes = ((elapsedMs % 3_600_000) / 60_000).toInt()
+            findViewById<TextView>(R.id.tvCheckIn).text = "Check-in: ${localFmt.format(checkInDate)}"
+            findViewById<TextView>(R.id.tvElapsed).text = "Elapsed: ${hours}h ${minutes}m"
+        } catch (e: Exception) {
+            android.util.Log.e("MainActivity", "Check-in parse error: ${e.message}")
+        }
+    }
+
+    private fun showNotificationInbox() {
+        val entries = NotificationStore.load(this)
+        if (entries.isEmpty()) {
+            AlertDialog.Builder(this)
+                .setTitle("Notifications")
+                .setMessage("No notifications yet.")
+                .setPositiveButton("OK", null)
+                .show()
+            return
+        }
+        val dateFmt = SimpleDateFormat("dd MMM, hh:mm a", Locale.US)
+        val items = entries.map { e ->
+            "${dateFmt.format(Date(e.timestampMs))}\n${e.body}"
+        }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle("Notifications")
+            .setItems(items, null)
+            .setNeutralButton("Clear all") { _, _ ->
+                NotificationStore.clear(this)
+            }
+            .setPositiveButton("Close", null)
+            .show()
     }
 
     private fun updateOverallStatus() {
@@ -268,6 +335,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         updateTimer?.cancel()
+        activityScope.coroutineContext[kotlinx.coroutines.Job]?.cancel()
         super.onDestroy()
     }
 

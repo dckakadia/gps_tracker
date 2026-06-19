@@ -135,11 +135,11 @@ curl -X POST http://116.74.77.22:8095/api/app/upload \
   -F "apk=@app/build/outputs/apk/release/app-release.apk;type=application/vnd.android.package-archive"
 ```
 
-**Current published version:** `1.1.0` (versionCode 110) — push notification support: `POST_NOTIFICATIONS` permission, `GpsTrackerMessagingService`, notification channel, high-priority FCM delivery.
+**Current published version:** `1.1.1` (versionCode 111) — check-in time + elapsed hours on home screen; notification inbox (bell icon in header).
 
 **First install on a new device (no USB):** Share the direct download link via WhatsApp/email:
 ```
-http://116.74.77.22:8095/api/app/download/gpstracker_ver_1_1_0.apk
+http://116.74.77.22:8095/api/app/download/gpstracker_ver_1_1_1.apk
 ```
 User opens in browser, enables "Install from unknown sources" once, installs. All future updates are automatic via in-app OTA.
 

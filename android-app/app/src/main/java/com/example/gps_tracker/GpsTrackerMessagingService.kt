@@ -29,6 +29,7 @@ class GpsTrackerMessagingService : FirebaseMessagingService() {
     override fun onMessageReceived(message: RemoteMessage) {
         val title = message.notification?.title ?: "GPS Tracker"
         val body = message.notification?.body ?: return
+        NotificationStore.save(this, title, body)
         showNotification(title, body)
     }
 

@@ -55,6 +55,22 @@
             app:backgroundTint="#FF9800"
             android:textColor="@color/white" />
 
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnNotifications"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_marginStart="8dp"
+            android:minWidth="0dp"
+            android:minHeight="0dp"
+            android:padding="0dp"
+            app:icon="@drawable/ic_notification"
+            app:iconSize="22dp"
+            app:iconGravity="textStart"
+            app:iconPadding="0dp"
+            style="@style/Widget.MaterialComponents.Button.TextButton"
+            android:textColor="@color/white"
+            app:iconTint="@color/white" />
+
     </androidx.appcompat.widget.LinearLayoutCompat>
 
     <!-- Battery optimization warning banner -->

@@ -290,6 +290,32 @@ object ApiClient {
         }
     }
 
+    data class AttendanceResult(val checkIn: String?, val checkOut: String?)
+
+    suspend fun getTodayAttendance(context: Context): AttendanceResult? {
+        return withContext(Dispatchers.IO) {
+            try {
+                if (!ensureFreshToken(context)) return@withContext null
+                val request = Request.Builder()
+                    .url("$BASE_URL/users/me/attendance")
+                    .addHeader("Authorization", "Bearer ${authToken ?: ""}")
+                    .get()
+                    .build()
+                client.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) return@withContext null
+                    val body = response.body?.string() ?: return@withContext null
+                    val json = org.json.JSONObject(body)
+                    val checkIn = if (json.isNull("check_in")) null else json.getString("check_in")
+                    val checkOut = if (json.isNull("check_out")) null else json.getString("check_out")
+                    AttendanceResult(checkIn, checkOut)
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("ApiClient", "getTodayAttendance exception: ${e.message}")
+                null
+            }
+        }
+    }
+
     /**
      * [statusCode] carries the HTTP response code on a server response, or null when the
      * request never reached the server (network error / timeout). Callers use this to tell
