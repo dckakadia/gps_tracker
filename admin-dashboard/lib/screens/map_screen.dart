@@ -34,6 +34,11 @@ class _MapScreenState extends State<MapScreen> {
   bool _isPaused = false;
   Map<int, double> _userDistances = {};
   List<Map<String, dynamic>> _geofences = [];
+  // True after the first successful fetch — suppresses the full-screen loading
+  // spinner on subsequent 12-second polls so FlutterMap is never removed from
+  // the widget tree. Removing it causes FlutterMapState to reinitialize from
+  // MapOptions.zoom = 5, which is the root cause of the camera-reset bug.
+  bool _initialLoadDone = false;
 
   // --- Follow-mode camera state ---
   // True when the admin has tapped a specific user and is in the live single-user view.
@@ -79,10 +84,19 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   Future<void> _fetchLocations() async {
-    setState(() { isLoading = true; errorMessage = null; _secondsUntilRefresh = 12; });
+    // Only show the full-screen loading spinner on the very first fetch.
+    // Subsequent polls must NOT set isLoading = true: doing so returns a plain
+    // CircularProgressIndicator from build(), which removes FlutterMap from the
+    // widget tree. When FlutterMap is re-inserted its FlutterMapState is recreated
+    // and re-reads MapOptions.zoom = 5, resetting the camera regardless of follow mode.
+    setState(() {
+      if (!_initialLoadDone) isLoading = true;
+      errorMessage = null;
+      _secondsUntilRefresh = 12;
+    });
     try {
       final result = await ApiService.getLatestLocations(widget.token, includeStale: true);
-      setState(() { locations = result; isLoading = false; });
+      setState(() { locations = result; isLoading = false; _initialLoadDone = true; });
       _fetchAllDistances();
       // Overview mode: only auto-zoom if the admin hasn't manually panned within the last 45 s.
       // Single-user follow mode: camera is driven by the socket handler, not the poll.
@@ -572,15 +586,20 @@ class _MapScreenState extends State<MapScreen> {
             : const LatLng(20, 0),
         zoom: 5,
         // Detect manual map interaction to pause auto-camera.
-        // flutter_map v5.0.0 API note: MapEventMove covers onDrag and onMultiFinger
-        // (pinch); MapEventScrollWheelZoom is a separate class for scroll-wheel zoom.
-        // MapEventSource.multiFingerEnd produces MapEventMoveEnd, not MapEventMove.
+        // flutter_map v5.0.0 API note:
+        //   MapEventMove covers onDrag (drag pan) and onMultiFinger (pinch pan/zoom).
+        //   MapEventScrollWheelZoom is a separate class for trackpad/scroll-wheel zoom.
+        //   MapEventDoubleTapZoomStart fires once when a double-tap zoom begins.
+        //   MapEventFlingAnimationStart fires once when a fling gesture begins.
+        //   MapEventSource.multiFingerEnd produces MapEventMoveEnd, not MapEventMove.
         onMapEvent: (MapEvent event) {
           final bool isUserGesture;
           if (event is MapEventMove) {
             isUserGesture = event.source == MapEventSource.onDrag ||
                 event.source == MapEventSource.onMultiFinger;
-          } else if (event is MapEventScrollWheelZoom) {
+          } else if (event is MapEventScrollWheelZoom ||
+              event is MapEventDoubleTapZoomStart ||
+              event is MapEventFlingAnimationStart) {
             isUserGesture = true;
           } else {
             isUserGesture = false;
