@@ -23,6 +23,11 @@ import { initializeAttendance } from './db/init-attendance.js';
 import { initializeBatteryColumn } from './db/init-battery.js';
 import { initializeArchive } from './db/init-archive.js';
 import { initializeGeofences } from './db/init-geofences.js';
+import { initializeAntiCheat } from './db/init-anticheat.js';
+import { initializePostGIS } from './db/init-postgis.js';
+import { initializeGpsQuality } from './db/init-gps-quality.js';
+import deviceEventRoutes from './routes/device-events.js';
+import stopsRoutes from './routes/stops.js';
 import { migrateGeofenceEvents } from './db/migrate-geofence-events.js';
 import { initializeFcm } from './db/init-fcm.js';
 import pool from './db/index.js';
@@ -83,6 +88,9 @@ app.use('/api/locations', locationRoutes);
 app.use('/api/backup', backupRoutes);
 app.use('/api/geofences', geofencesRoutes);
 app.use('/api/app', appRoutes);
+app.use('/api/device-events', deviceEventRoutes);
+app.use('/api/stops', stopsRoutes);
+app.use('/api/routes', locationRoutes); // alias for /api/routes/summary
 
 app.get('/health', async (req, res) => {
   try {
@@ -211,6 +219,24 @@ const startServer = async () => {
     await initializeFcm();
   } catch (err) {
     console.error('Failed to initialize FCM column:', err.message);
+  }
+
+  try {
+    await initializeAntiCheat();
+  } catch (err) {
+    console.error('Failed to initialize anti-cheat schema:', err.message);
+  }
+
+  try {
+    await initializePostGIS();
+  } catch (err) {
+    console.error('Failed to initialize PostGIS (non-fatal):', err.message);
+  }
+
+  try {
+    await initializeGpsQuality();
+  } catch (err) {
+    console.error('Failed to initialize GPS quality columns:', err.message);
   }
 
   httpServer.listen(port, () => {

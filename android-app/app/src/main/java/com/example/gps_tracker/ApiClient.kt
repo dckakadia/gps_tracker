@@ -187,13 +187,15 @@ object ApiClient {
 
                 val payload = points.map { point ->
                     val pointMap = mutableMapOf<String, Any>(
-                        "latitude" to point.latitude,
-                        "longitude" to point.longitude,
-                        "recorded_at" to point.recordedAt
+                        "latitude"    to point.latitude,
+                        "longitude"   to point.longitude,
+                        "recorded_at" to point.recordedAt,
+                        "is_spoofed"  to point.isSpoofed,
                     )
-                    if (point.batteryLevel >= 0) {
-                        pointMap["battery_level"] = point.batteryLevel
-                    }
+                    if (point.batteryLevel >= 0) pointMap["battery_level"] = point.batteryLevel
+                    if (point.accuracy >= 0f)    pointMap["accuracy"]      = point.accuracy
+                    if (point.speed >= 0f)       pointMap["speed"]         = point.speed
+                    if (point.bearing >= 0f)     pointMap["heading"]       = point.bearing
                     pointMap
                 }
 
@@ -285,6 +287,47 @@ object ApiClient {
                 }
             } catch (e: Exception) {
                 android.util.Log.e("ApiClient", "saveFcmToken exception: ${e.message}", e)
+                false
+            }
+        }
+    }
+
+    /**
+     * Uploads unsynced SystemEventEntity rows to the server audit log.
+     * Called by SyncWorker alongside location sync to ensure tamper events reach the backend
+     * even when the device was offline at the time they occurred.
+     */
+    suspend fun reportDeviceEvents(context: Context, events: List<SystemEventEntity>): Boolean {
+        if (events.isEmpty()) return true
+        return withContext(Dispatchers.IO) {
+            try {
+                if (!ensureFreshToken(context)) return@withContext false
+                val payload = events.map { e ->
+                    mapOf(
+                        "event_type"  to e.eventType,
+                        "occurred_at" to e.occurredAt,
+                        "detail"      to (e.detail ?: ""),
+                    )
+                }
+                val json = adapter.toJson(payload)
+                val request = Request.Builder()
+                    .url("$BASE_URL/device-events")
+                    .addHeader("Authorization", "Bearer ${authToken ?: ""}")
+                    .post(json.toRequestBody("application/json; charset=utf-8".toMediaType()))
+                    .build()
+                client.newCall(request).execute().use { response ->
+                    if (response.isSuccessful) {
+                        android.util.Log.i("ApiClient",
+                            "Device events reported: ${events.size}")
+                        true
+                    } else {
+                        android.util.Log.w("ApiClient",
+                            "Device event report failed: HTTP ${response.code}")
+                        false
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("ApiClient", "reportDeviceEvents exception: ${e.message}", e)
                 false
             }
         }

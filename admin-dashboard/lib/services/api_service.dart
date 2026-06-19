@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import '../models/user.dart';
 import '../models/location_point.dart';
+import '../models/stop_point.dart';
 
 class ApiService {
   // Production: served via nginx, so /api resolves to the same origin.
@@ -310,6 +311,27 @@ class ApiService {
     }
     final events = (body['events'] as List?) ?? <dynamic>[];
     return events.map((e) => e as Map<String, dynamic>).toList();
+  }
+
+  static Future<List<StopPoint>> getStops(String token, int userId, String date) async {
+    final uri = buildUri('/stops?user_id=$userId&date=$date&compute=true');
+    final response = await http.get(uri, headers: {'Authorization': 'Bearer $token'});
+    final body = response.body.isNotEmpty ? jsonDecode(response.body) as Map<String, dynamic> : <String, dynamic>{};
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception(body['error'] ?? 'Failed to load stops');
+    }
+    final stops = (body['stops'] as List?) ?? <dynamic>[];
+    return stops.map((s) => StopPoint.fromJson(s as Map<String, dynamic>)).toList();
+  }
+
+  static Future<Map<String, dynamic>> getRouteSummary(String token, int userId, String date) async {
+    final uri = buildUri('/routes/summary?user_id=$userId&date=$date');
+    final response = await http.get(uri, headers: {'Authorization': 'Bearer $token'});
+    final body = response.body.isNotEmpty ? jsonDecode(response.body) as Map<String, dynamic> : <String, dynamic>{};
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception(body['error'] ?? 'Failed to get route summary');
+    }
+    return body;
   }
 
   static Future<Map<String, dynamic>> updateGeofence(

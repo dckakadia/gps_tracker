@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:http/http.dart' as http;
+import '../models/location_point.dart';
 import '../services/api_service.dart';
 import '../theme/app_theme.dart';
 
@@ -50,6 +51,28 @@ class _GeofenceScreenState extends State<GeofenceScreen> {
     } finally {
       setState(() => _loading = false);
     }
+    WidgetsBinding.instance.addPostFrameCallback((_) => _centerMapOnData());
+  }
+
+  Future<void> _centerMapOnData() async {
+    if (!mounted) return;
+    if (_geofences.isNotEmpty) {
+      final lats = _geofences.map((g) => (g['latitude'] as num).toDouble());
+      final lngs = _geofences.map((g) => (g['longitude'] as num).toDouble());
+      final centerLat = lats.reduce((a, b) => a + b) / _geofences.length;
+      final centerLng = lngs.reduce((a, b) => a + b) / _geofences.length;
+      _mapController.move(LatLng(centerLat, centerLng), _geofences.length == 1 ? 13.0 : 10.0);
+      return;
+    }
+    // No geofences yet — center on live user locations so admin can pick a spot.
+    try {
+      final locs = await ApiService.getLatestLocations(widget.token, includeStale: true);
+      if (locs.isNotEmpty && mounted) {
+        final avgLat = locs.map((l) => l.latitude).reduce((a, b) => a + b) / locs.length;
+        final avgLng = locs.map((l) => l.longitude).reduce((a, b) => a + b) / locs.length;
+        _mapController.move(LatLng(avgLat, avgLng), 11.0);
+      }
+    } catch (_) {}
   }
 
   Future<void> _createGeofence(double latitude, double longitude) async {
@@ -479,6 +502,7 @@ class _GeofenceScreenState extends State<GeofenceScreen> {
           options: MapOptions(
             center: const LatLng(20, 0),
             zoom: 5,
+            maxZoom: 19,
             onTap: _drawMode
                 ? (tapPos, point) {
                     _createGeofence(point.latitude, point.longitude);
@@ -490,6 +514,7 @@ class _GeofenceScreenState extends State<GeofenceScreen> {
             TileLayer(
               urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
               userAgentPackageName: 'com.example.gps_tracker',
+              maxZoom: 19,
             ),
             CircleLayer(
               circles: _geofences.map((gf) {

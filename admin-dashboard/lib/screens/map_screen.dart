@@ -116,8 +116,16 @@ class _MapScreenState extends State<MapScreen> {
 
   void _initSocket() {
     try {
-      final uri = Uri.parse(ApiService.baseUrl.replaceFirst('/api', ''));
-      final url = '${uri.scheme}://${uri.host}:${uri.port}';
+      // When API_URL is relative (e.g. '/api' for nginx same-origin proxy),
+      // derive socket origin from the browser page URL instead of a broken parse.
+      final String url;
+      if (ApiService.baseUrl.startsWith('/')) {
+        final p = Uri.base;
+        url = Uri(scheme: p.scheme, host: p.host, port: p.port).toString();
+      } else {
+        final p = Uri.parse(ApiService.baseUrl.replaceFirst('/api', ''));
+        url = Uri(scheme: p.scheme, host: p.host, port: p.port).toString();
+      }
       _socket = IO.io(url, IO.OptionBuilder()
           .setTransports(['websocket'])
           .setAuth({'token': widget.token})
@@ -155,19 +163,15 @@ class _MapScreenState extends State<MapScreen> {
           final userId = d['user_id'];
           final gf = _geofences.firstWhere((g) => g['id'] == geofenceId, orElse: () => {'name': 'Geofence'});
           if (mounted) {
+            // Server emits event as 'enter' or 'exit' (present tense, matches DB).
+            final verb = event == 'enter' ? 'entered' : 'exited';
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
-                content: Text('⚡ User ${event == 'entered' ? 'entered' : 'exited'} ${gf['name']}'),
+                content: Text('⚡ User $verb ${gf['name']}'),
                 behavior: SnackBarBehavior.floating,
                 backgroundColor: AppTheme.warning,
               ),
             );
-          }
-          // Persist the event for the Events history screen.
-          if (userId != null && geofenceId != null) {
-            final eventType = event == 'entered' ? 'enter' : 'exit';
-            ApiService.postGeofenceEvent(widget.token, userId as int, geofenceId as int, eventType)
-                .catchError((_) {});
           }
         } catch (_) {}
       });
