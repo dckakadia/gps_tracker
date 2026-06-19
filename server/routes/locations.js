@@ -141,9 +141,16 @@ router.post('/', uploadLimiter, authorize, async (req, res) => {
                ON CONFLICT (user_id, geofence_id) DO UPDATE SET inside = EXCLUDED.inside`,
               [userId, gf.id, isInside]
             );
-            if (io && isInside !== prevInside) {
-              const event = isInside ? 'entered' : 'exited';
-              io.emit('geofence:alert', { user_id: userId, geofence_id: gf.id, event });
+            if (isInside !== prevInside) {
+              const eventType = isInside ? 'enter' : 'exit';
+              // Persist the crossing to geofence_events so the Events page shows history
+              await query(
+                'INSERT INTO geofence_events (user_id, geofence_id, event_type) VALUES ($1, $2, $3)',
+                [userId, gf.id, eventType]
+              );
+              if (io) {
+                io.emit('geofence:alert', { user_id: userId, geofence_id: gf.id, event: eventType });
+              }
             }
           }
         }

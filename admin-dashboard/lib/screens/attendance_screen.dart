@@ -2,6 +2,7 @@
 import 'dart:html' as html;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import '../services/api_service.dart';
 import '../theme/app_theme.dart';
 
@@ -16,6 +17,7 @@ class AttendanceScreen extends StatefulWidget {
 class _AttendanceScreenState extends State<AttendanceScreen> {
   DateTime _selectedDate = DateTime.now();
   bool _loading = false;
+  bool _exporting = false;
   List<Map<String, dynamic>> _attendance = [];
   String? _error;
 
@@ -39,11 +41,44 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     }
   }
 
-  void _exportCsv() {
-    if (!kIsWeb) return;
+  Future<void> _exportCsv() async {
+    if (!kIsWeb || _exporting) return;
+    setState(() => _exporting = true);
     final dateStr = _selectedDate.toIso8601String().split('T')[0];
-    final url = '${ApiService.baseUrl}/admin/attendance/export?date=$dateStr&token=${widget.token}';
-    html.window.open(url, '_blank');
+    final uri = Uri.parse('${ApiService.baseUrl}/admin/attendance/export?date=$dateStr');
+    try {
+      final response = await http.get(uri, headers: {'Authorization': 'Bearer ${widget.token}'});
+      if (response.statusCode != 200) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Export failed (${response.statusCode})'), backgroundColor: Colors.red),
+          );
+        }
+        return;
+      }
+      final blob = html.Blob([response.bodyBytes], 'text/csv');
+      final blobUrl = html.Url.createObjectUrlFromBlob(blob);
+      final anchor = html.AnchorElement(href: blobUrl)
+        ..download = 'attendance-$dateStr.csv'
+        ..style.display = 'none';
+      html.document.body!.append(anchor);
+      anchor.click();
+      anchor.remove();
+      html.Url.revokeObjectUrl(blobUrl);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('CSV downloaded'), duration: Duration(seconds: 2)),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Export error: $e'), backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _exporting = false);
+    }
   }
 
   String _formatTime(String? isoString) {
@@ -115,15 +150,17 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
               ),
               const SizedBox(width: 8),
               OutlinedButton.icon(
-                icon: const Icon(Icons.download, size: 15),
-                label: const Text('Export CSV'),
+                icon: _exporting
+                    ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.download, size: 15),
+                label: Text(_exporting ? 'Exporting…' : 'Export CSV'),
                 style: OutlinedButton.styleFrom(
                   foregroundColor: AppTheme.primaryLight,
                   side: const BorderSide(color: AppTheme.border),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppTheme.radiusSm)),
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 ),
-                onPressed: (_loading || _attendance.isEmpty) ? null : _exportCsv,
+                onPressed: (_loading || _attendance.isEmpty || _exporting) ? null : _exportCsv,
               ),
               const Spacer(),
               // Summary chip

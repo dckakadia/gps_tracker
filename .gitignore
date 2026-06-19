@@ -10,6 +10,8 @@ android-app/.externalNativeBuild
 android-app/app/build
 android-app/gradle-*
 android-app/*.zip
+android-app/google-services.json
+android-app/app/google-services.json
 
 # Flutter
 admin-dashboard/.dart_tool

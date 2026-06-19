@@ -3,6 +3,7 @@ import 'dart:ui' as ui;
 // ignore: avoid_web_libraries_in_flutter
 import 'dart:html' as html;
 import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:http/http.dart' as http;
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -23,6 +24,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
   List<UserModel> _users = [];
   UserModel? _selectedUser;
   DateTime _selectedDate = DateTime.now();
+  DateTime? _loadedDate;
   bool _loading = false;
   List<LocationPoint> _points = [];
   String? _error;
@@ -77,6 +79,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
       final history = await ApiService.getLocationHistory(widget.token, _selectedUser!.id, date: dateStr);
       setState(() {
         _points = history;
+        _loadedDate = _selectedDate;
         _loading = false;
       });
       // Map renders conditionally on hasData — wait for next frame before moving the controller
@@ -172,12 +175,59 @@ class _HistoryScreenState extends State<HistoryScreen> {
   String _formatDate(DateTime d) =>
       '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
 
-  void _exportCsv() {
-    if (!kIsWeb || _selectedUser == null) return;
-    final dateStr = _selectedDate.toIso8601String().split('T')[0];
-    final url =
-        '${ApiService.baseUrl}/locations/history/${_selectedUser!.id}/export?date=$dateStr&token=${widget.token}';
-    html.window.open(url, '_blank');
+  bool _exporting = false;
+
+  Future<void> _exportCsv() async {
+    if (!kIsWeb || _selectedUser == null || _loadedDate == null || _exporting) return;
+    setState(() => _exporting = true);
+
+    final dateStr = _loadedDate!.toIso8601String().split('T')[0];
+    final uri = Uri.parse('${ApiService.baseUrl}/locations/history/${_selectedUser!.id}/export?date=$dateStr');
+
+    try {
+      final response = await http.get(
+        uri,
+        headers: {'Authorization': 'Bearer ${widget.token}'},
+      );
+
+      if (response.statusCode != 200) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Export failed (${response.statusCode})'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+        return;
+      }
+
+      // Build a blob URL from the response bytes and trigger download via anchor.
+      // This is the only approach that reliably works in Flutter CanvasKit web builds.
+      final blob = html.Blob([response.bodyBytes], 'text/csv');
+      final blobUrl = html.Url.createObjectUrlFromBlob(blob);
+      final anchor = html.AnchorElement(href: blobUrl)
+        ..download = 'location-history-${_selectedUser!.name}-$dateStr.csv'
+        ..style.display = 'none';
+      html.document.body!.append(anchor);
+      anchor.click();
+      anchor.remove();
+      html.Url.revokeObjectUrl(blobUrl);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('CSV downloaded'), duration: Duration(seconds: 2)),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Export error: $e'), backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _exporting = false);
+    }
   }
 
   @override
@@ -515,7 +565,14 @@ class _HistoryScreenState extends State<HistoryScreen> {
           firstDate: DateTime(2020),
           lastDate: DateTime.now(),
         );
-        if (picked != null) setState(() => _selectedDate = picked);
+        if (picked != null) {
+          setState(() {
+            _selectedDate = picked;
+            // clear loaded data so export button disables until re-loaded
+            _points = [];
+            _loadedDate = null;
+          });
+        }
       },
       child: Container(
         height: 44,
@@ -552,17 +609,20 @@ class _HistoryScreenState extends State<HistoryScreen> {
   }
 
   Widget _exportButton() {
+    final canExport = _points.isNotEmpty && _loadedDate != null && !_exporting;
     return SizedBox(
       height: 44,
       child: OutlinedButton.icon(
-        icon: const Icon(Icons.download, size: 18),
-        label: const Text('Export CSV'),
+        icon: _exporting
+            ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+            : const Icon(Icons.download, size: 18),
+        label: Text(_exporting ? 'Exporting…' : 'Export CSV'),
         style: OutlinedButton.styleFrom(
           foregroundColor: AppTheme.primaryLight,
           side: const BorderSide(color: AppTheme.border),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppTheme.radiusSm)),
         ),
-        onPressed: (_points.isEmpty) ? null : _exportCsv,
+        onPressed: canExport ? _exportCsv : null,
       ),
     );
   }

@@ -72,6 +72,8 @@ The server uses ES modules (`"type": "module"` in package.json). All imports mus
 
 **Archive job**: Runs at 2 AM daily — moves `locations` rows older than 90 days to `locations_archive`.
 
+**Geofence event persistence**: On every location upload, all geofences are checked via in-process haversine. State is tracked in `user_geofence_state`. When `isInside !== prevInside` (boundary crossing detected), a row is inserted into `geofence_events` (`event_type`: `'enter'` or `'exit'`) AND a `geofence:alert` Socket.IO event is emitted. Both must stay in sync — if you touch the geofence block in `routes/locations.js`, ensure the DB insert and the socket emit both fire on every crossing.
+
 **Rate limiting**: Location upload endpoint is limited to 60 requests/min per IP.
 
 ### nginx (production server)
@@ -133,11 +135,11 @@ curl -X POST http://116.74.77.22:8095/api/app/upload \
   -F "apk=@app/build/outputs/apk/release/app-release.apk;type=application/vnd.android.package-archive"
 ```
 
-**Current published version:** `1.0.8` (versionCode 108) — button turns blue when tracking active; immediate upload on Start Tracking so user appears online instantly.
+**Current published version:** `1.1.0` (versionCode 110) — push notification support: `POST_NOTIFICATIONS` permission, `GpsTrackerMessagingService`, notification channel, high-priority FCM delivery.
 
 **First install on a new device (no USB):** Share the direct download link via WhatsApp/email:
 ```
-http://116.74.77.22:8095/api/app/download/gpstracker_ver_1_0_7.apk
+http://116.74.77.22:8095/api/app/download/gpstracker_ver_1_1_0.apk
 ```
 User opens in browser, enables "Install from unknown sources" once, installs. All future updates are automatic via in-app OTA.
 
@@ -231,9 +233,17 @@ TrackingService.isMotionSensorAvailable // set once in onCreate
 - `UpdateChecker.kt` — polls `/api/app/version`, downloads and installs APK via `DownloadManager` + `FileProvider`
 - `DebugActivity.kt` — in-app debug screen (long-press version label); shows live logs (`LiveLogManager`) and persistent logs (`LogPersistor`)
 
-**Permissions required:** `ACCESS_FINE_LOCATION`, `ACCESS_COARSE_LOCATION`, `ACCESS_BACKGROUND_LOCATION` (Android 10+), `FOREGROUND_SERVICE_LOCATION` (Android 14+), `REQUEST_INSTALL_PACKAGES` (OTA updates).
+**Permissions required:** `ACCESS_FINE_LOCATION`, `ACCESS_COARSE_LOCATION`, `ACCESS_BACKGROUND_LOCATION` (Android 10+), `FOREGROUND_SERVICE_LOCATION` (Android 14+), `REQUEST_INSTALL_PACKAGES` (OTA updates), `POST_NOTIFICATIONS` (Android 13+, required for push notifications).
 
-**FCM**: Firebase push notifications are wired — server sends via `firebase-admin`, Android receives via `FcmTokenManager`. Firebase config is in `android-app/app/google-services.json`.
+**FCM push notifications:**
+- `FcmTokenManager.kt` — registers FCM token with server on each `MainActivity.onCreate` (if logged in)
+- `GpsTrackerMessagingService.kt` — `FirebaseMessagingService` subclass; handles `onMessageReceived` (foreground notifications) and `onNewToken` (re-registers refreshed tokens)
+- Notification channel `gps_tracker_alerts` created in `MainActivity.createNotificationChannel()` (Android 8+ required)
+- `POST_NOTIFICATIONS` permission requested at runtime in `MainActivity.requestNotificationPermission()` (Android 13+)
+- Firebase config: `android-app/app/google-services.json` (gitignored — Android client config, NOT the server admin SDK key)
+- Server sends with `android.priority: 'high'` to bypass Doze mode
+
+**FCM server init — ES module hoisting caveat:** `fcm.js` top-level code runs before `dotenv.config()` in `app.js` because ES module imports are hoisted. `fcm.js` uses **lazy initialization**: `initFcm()` is called on the first `sendNotification()` invocation (by which time dotenv has run). Do not move initialization back to module top-level.
 
 ---
 
@@ -265,6 +275,48 @@ Single-page Flutter web app. Auth state is stored in static `AuthState.token`. A
 Login accepts email, username, name, or user ID (matching server auth behavior).
 
 `MyHttpOverrides` in `main.dart` disables SSL certificate validation — intentional for self-hosted HTTP deployment.
+
+### CSV Export pattern (History + Attendance screens)
+
+`html.window.open(url, '_blank')` and `AnchorElement.click()` on a remote URL both fail silently in Flutter CanvasKit web builds — the canvas layer intercepts the DOM before the browser's native download handler fires.
+
+**Correct approach** (implemented in both `history_screen.dart` and `attendance_screen.dart`):
+1. Fetch CSV via Dart `http.get` with `Authorization: Bearer <token>` header
+2. Wrap `response.bodyBytes` in a `html.Blob`
+3. Get a `blob:` URL via `html.Url.createObjectUrlFromBlob(blob)`
+4. Click a transient `html.AnchorElement` pointing at the blob URL
+5. Revoke the blob URL immediately after click
+
+```dart
+final blob = html.Blob([response.bodyBytes], 'text/csv');
+final blobUrl = html.Url.createObjectUrlFromBlob(blob);
+final anchor = html.AnchorElement(href: blobUrl)
+  ..download = 'filename.csv'
+  ..style.display = 'none';
+html.document.body!.append(anchor);
+anchor.click();
+anchor.remove();
+html.Url.revokeObjectUrl(blobUrl);
+```
+
+Apply this pattern to **any future file download** added to the admin dashboard.
+
+### Admin dashboard deploy workflow
+
+The `./build-and-deploy.sh` script may not have correct permissions on `/var/www/gps-tracker-admin/` (owned by `www-data`). Manual deploy steps:
+
+```bash
+# 1. Build
+cd admin-dashboard && flutter build web --release
+
+# 2. Upload to temp dir (user has write access there)
+scp -r build/web/* dckakadia@116.74.77.22:/tmp/web_deploy/
+
+# 3. Move with sudo
+ssh dckakadia@116.74.77.22 "echo PASSWORD | sudo -S bash -c 'cp -r /tmp/web_deploy/. /var/www/gps-tracker-admin/ && chown -R www-data:www-data /var/www/gps-tracker-admin/'"
+```
+
+Users must hard-refresh (`Ctrl+Shift+R`) after deploys to clear the cached Flutter service worker.
 
 ---
 

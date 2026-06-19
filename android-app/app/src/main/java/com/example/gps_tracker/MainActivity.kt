@@ -2,6 +2,9 @@ package com.example.gps_tracker
 
 import android.Manifest
 import android.app.ActivityManager
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.content.Context
 import android.content.Intent
 import android.content.res.ColorStateList
 import android.content.pm.PackageManager
@@ -28,6 +31,7 @@ import java.util.Timer
 class MainActivity : AppCompatActivity() {
     private val LOCATION_PERMISSION_REQUEST_CODE = 100
     private val BACKGROUND_LOCATION_REQUEST_CODE = 101
+    private val NOTIFICATION_PERMISSION_REQUEST_CODE = 102
     private var locationManager: LocationManager? = null
     private var updateTimer: Timer? = null
     private lateinit var authStatusText: TextView
@@ -84,6 +88,9 @@ class MainActivity : AppCompatActivity() {
                 UpdateChecker.showUpdateDialog(this, info)
             }
         }
+
+        createNotificationChannel()
+        requestNotificationPermission()
 
         updateAuthStatus()
 
@@ -264,6 +271,32 @@ class MainActivity : AppCompatActivity() {
         super.onDestroy()
     }
 
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                GpsTrackerMessagingService.CHANNEL_ID,
+                "GPS Tracker Alerts",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply { description = "Admin alerts from GPS Tracker" }
+            val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            manager.createNotificationChannel(channel)
+        }
+    }
+
+    private fun requestNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED
+            ) {
+                ActivityCompat.requestPermissions(
+                    this,
+                    arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                    NOTIFICATION_PERMISSION_REQUEST_CODE
+                )
+            }
+        }
+    }
+
     private fun showLogoutDialog() {
         android.util.Log.i("MainActivity", "Logout clicked")
         AlertDialog.Builder(this)
@@ -353,6 +386,13 @@ class MainActivity : AppCompatActivity() {
                     startTrackingService()
                 } else {
                     android.util.Log.w("MainActivity", "Background location denied — tracking will not work in background")
+                }
+            }
+            NOTIFICATION_PERMISSION_REQUEST_CODE -> {
+                if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                    android.util.Log.i("MainActivity", "Notification permission granted")
+                } else {
+                    android.util.Log.w("MainActivity", "Notification permission denied — push notifications won't show")
                 }
             }
         }
