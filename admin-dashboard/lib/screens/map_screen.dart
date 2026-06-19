@@ -35,6 +35,15 @@ class _MapScreenState extends State<MapScreen> {
   Map<int, double> _userDistances = {};
   List<Map<String, dynamic>> _geofences = [];
 
+  // --- Follow-mode camera state ---
+  // True when the admin has tapped a specific user and is in the live single-user view.
+  bool _isFollowingSingleUser = false;
+  // True means the camera auto-pans to keep the followed user in view.
+  // Becomes false the moment the admin manually drags/zooms the map.
+  bool _isFollowModeActive = false;
+  // Tracks the last time the admin manually moved the map (drag, pinch, scroll).
+  DateTime? _lastManualMapInteraction;
+
   final DraggableScrollableController _sheetController = DraggableScrollableController();
 
   @override
@@ -75,7 +84,17 @@ class _MapScreenState extends State<MapScreen> {
       final result = await ApiService.getLatestLocations(widget.token, includeStale: true);
       setState(() { locations = result; isLoading = false; });
       _fetchAllDistances();
-      WidgetsBinding.instance.addPostFrameCallback((_) => _autoZoomToMarkers(_filteredLocations));
+      // Overview mode: only auto-zoom if the admin hasn't manually panned within the last 45 s.
+      // Single-user follow mode: camera is driven by the socket handler, not the poll.
+      if (!_isFollowingSingleUser) {
+        final sinceInteraction = _lastManualMapInteraction == null
+            ? null
+            : DateTime.now().difference(_lastManualMapInteraction!);
+        if (sinceInteraction == null || sinceInteraction.inSeconds > 45) {
+          WidgetsBinding.instance.addPostFrameCallback(
+              (_) => _autoZoomToMarkers(_filteredLocations));
+        }
+      }
     } catch (err) {
       setState(() { locations = []; isLoading = false; errorMessage = err.toString(); });
     }
@@ -93,11 +112,24 @@ class _MapScreenState extends State<MapScreen> {
       _socket?.on('location:uploaded', (data) {
         try {
           final updated = LocationPoint.fromJson(Map<String, dynamic>.from(data));
+          // Capture follow state before setState to use it consistently below.
+          final shouldFollow = _isFollowingSingleUser &&
+              _isFollowModeActive &&
+              _selectedLocation?.userId == updated.userId;
           setState(() {
             final idx = locations.indexWhere((l) => l.userId == updated.userId);
             if (idx >= 0) locations[idx] = updated; else locations.add(updated);
+            if (shouldFollow) _selectedLocation = updated;
           });
           _fetchDistanceForUser(updated.userId);
+          if (shouldFollow) {
+            // flutter_map v5 has no AnimatedMapController; using plain .move().
+            // Keeps the admin's current zoom — never recomputes from a bounding box.
+            _mapController.move(
+              LatLng(updated.latitude, updated.longitude),
+              _mapController.zoom,
+            );
+          }
         } catch (_) {}
       });
 
@@ -249,7 +281,13 @@ class _MapScreenState extends State<MapScreen> {
   Future<void> _fetchLocationHistory(LocationPoint location) async {
     try {
       final history = await ApiService.getLocationHistory(widget.token, location.userId);
-      setState(() { _selectedLocation = location; _locationHistory = history; _showingHistory = true; });
+      setState(() {
+        _selectedLocation = location;
+        _locationHistory = history;
+        _showingHistory = true;
+        _isFollowingSingleUser = false; // history view, not live follow
+        _isFollowModeActive = false;
+      });
     } catch (_) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Failed to load location history')),
@@ -298,7 +336,14 @@ class _MapScreenState extends State<MapScreen> {
 
   void _flyToLocation(LocationPoint l) {
     _mapController.move(LatLng(l.latitude, l.longitude), 15.0);
-    setState(() { _selectedLocation = l; _showingHistory = false; _locationHistory = null; });
+    setState(() {
+      _selectedLocation = l;
+      _showingHistory = false;
+      _locationHistory = null;
+      _isFollowingSingleUser = true;
+      _isFollowModeActive = true;
+      _lastManualMapInteraction = null;
+    });
   }
 
   void _autoZoomToMarkers(List<LocationPoint> pts) {
@@ -398,6 +443,11 @@ class _MapScreenState extends State<MapScreen> {
           Positioned(
             top: 10, left: 12, right: 12,
             child: _buildFilterBar(compact: true),
+          ),
+          // Camera action button (follow/re-center) — above the bottom sheet handle
+          Positioned(
+            bottom: 180, right: 16,
+            child: _buildCameraActionButton(),
           ),
           // Mobile bottom sheet for user list
           DraggableScrollableSheet(
@@ -502,6 +552,10 @@ class _MapScreenState extends State<MapScreen> {
                   ],
                 ),
               ),
+              Positioned(
+                bottom: 16, right: 16,
+                child: _buildCameraActionButton(),
+              ),
             ],
           ),
         ),
@@ -517,6 +571,27 @@ class _MapScreenState extends State<MapScreen> {
             ? LatLng(filteredLocations.first.latitude, filteredLocations.first.longitude)
             : const LatLng(20, 0),
         zoom: 5,
+        // Detect manual map interaction to pause auto-camera.
+        // flutter_map v5.0.0 API note: MapEventMove covers onDrag and onMultiFinger
+        // (pinch); MapEventScrollWheelZoom is a separate class for scroll-wheel zoom.
+        // MapEventSource.multiFingerEnd produces MapEventMoveEnd, not MapEventMove.
+        onMapEvent: (MapEvent event) {
+          final bool isUserGesture;
+          if (event is MapEventMove) {
+            isUserGesture = event.source == MapEventSource.onDrag ||
+                event.source == MapEventSource.onMultiFinger;
+          } else if (event is MapEventScrollWheelZoom) {
+            isUserGesture = true;
+          } else {
+            isUserGesture = false;
+          }
+          if (isUserGesture) {
+            // Mutate directly — no setState needed; the 1-s countdown timer will
+            // trigger the next rebuild to show/hide the camera action buttons.
+            _lastManualMapInteraction = DateTime.now();
+            if (_isFollowingSingleUser) _isFollowModeActive = false;
+          }
+        },
       ),
       children: [
         TileLayer(
@@ -734,6 +809,90 @@ class _MapScreenState extends State<MapScreen> {
         ),
       ),
     );
+  }
+
+  /// Floating action button shown over the map when the camera is out of sync
+  /// with the data. Shows "Resume following" in single-user mode when the admin
+  /// has panned away, or "Re-center" in overview mode after a manual pan.
+  Widget _buildCameraActionButton() {
+    if (_isFollowingSingleUser && !_isFollowModeActive) {
+      // Single-user follow mode: admin panned away — offer to resume.
+      return Material(
+        color: AppTheme.primary,
+        borderRadius: BorderRadius.circular(20),
+        elevation: 3,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(20),
+          onTap: () {
+            final current = locations.firstWhere(
+              (l) => l.userId == _selectedLocation!.userId,
+              orElse: () => _selectedLocation!,
+            );
+            setState(() {
+              _isFollowModeActive = true;
+              _lastManualMapInteraction = null;
+              _selectedLocation = current;
+            });
+            // flutter_map v5: plain .move(), keeps current zoom.
+            _mapController.move(
+              LatLng(current.latitude, current.longitude),
+              _mapController.zoom,
+            );
+          },
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            child: const Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.gps_fixed, size: 15, color: Colors.white),
+                SizedBox(width: 6),
+                Text('Resume following',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.white)),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    if (!_isFollowingSingleUser) {
+      final sinceInteraction = _lastManualMapInteraction == null
+          ? null
+          : DateTime.now().difference(_lastManualMapInteraction!);
+      if (sinceInteraction != null && sinceInteraction.inSeconds <= 45) {
+        // Overview mode: admin panned away — offer to re-center on all users.
+        return Material(
+          color: Colors.white.withOpacity(0.95),
+          borderRadius: BorderRadius.circular(20),
+          elevation: 2,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(20),
+            onTap: () {
+              setState(() => _lastManualMapInteraction = null);
+              _autoZoomToMarkers(_filteredLocations);
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: AppTheme.border),
+              ),
+              child: const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.center_focus_strong, size: 15, color: AppTheme.primaryLight),
+                  SizedBox(width: 6),
+                  Text('Re-center',
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.textDark)),
+                ],
+              ),
+            ),
+          ),
+        );
+      }
+    }
+
+    return const SizedBox.shrink();
   }
 
   Widget _refreshBadge() {
