@@ -504,10 +504,7 @@ class _GeofenceScreenState extends State<GeofenceScreen> {
             zoom: 5,
             maxZoom: 19,
             onTap: _drawMode
-                ? (tapPos, point) {
-                    _createGeofence(point.latitude, point.longitude);
-                    setState(() => _drawMode = false);
-                  }
+                ? (tapPos, point) => _createGeofence(point.latitude, point.longitude)
                 : null,
           ),
           children: [

@@ -142,21 +142,29 @@ router.post('/', uploadLimiter, authorize, async (req, res) => {
       let isFiltered = false;
 
       if (!spoofed) {
-        // ── GPS validation (reject bad points before filter) ──────────────────
+        // ── GPS validation ────────────────────────────────────────────────────
         const vResult = validateGPSPoint(prevAccepted, {
           lat: latitude, lng: longitude, timestamp_ms: tsMs, accuracy_m: accuracyM,
         });
-        if (!vResult.valid) {
-          console.info('GPS point rejected', { userId, index, reason: vResult.reason });
+
+        if (!vResult.valid && vResult.severity === 'hard') {
+          // True GPS teleport — discard silently
+          console.info('GPS point hard-rejected', { userId, index, reason: vResult.reason });
           continue;
         }
-        prevAccepted = { lat: latitude, lng: longitude, timestamp_ms: tsMs };
 
-        // ── Kalman smoothing ──────────────────────────────────────────────────
-        const kfResult = kf.update(latitude, longitude, tsMs, accuracyM);
-        finalLat   = kfResult.lat;
-        finalLng   = kfResult.lng;
-        isFiltered = kfResult.filtered;
+        if (!vResult.valid && vResult.severity === 'soft') {
+          // Low accuracy — save raw point flagged as filtered, skip Kalman
+          console.info('GPS point soft-rejected (saved as filtered)', { userId, index, reason: vResult.reason });
+          isFiltered = true;
+        } else {
+          // Good point — run Kalman smoothing
+          prevAccepted = { lat: latitude, lng: longitude, timestamp_ms: tsMs };
+          const kfResult = kf.update(latitude, longitude, tsMs, accuracyM);
+          finalLat   = kfResult.lat;
+          finalLng   = kfResult.lng;
+          isFiltered = kfResult.filtered;
+        }
       }
 
       validTs.push(recordedAtIso);
@@ -176,8 +184,8 @@ router.post('/', uploadLimiter, authorize, async (req, res) => {
 
     if (!placeholders.length) {
       await createUploadAudit({ userId, pointsCount, validPointsCount: 0,
-        status: 'rejected', errorMessage: 'All points failed validation', ipAddress, requestBody: req.body });
-      return res.status(422).json({ error: 'All points rejected by GPS validator', points_received: pointsCount });
+        status: 'rejected', errorMessage: 'All points hard-rejected (GPS teleport)', ipAddress, requestBody: req.body });
+      return res.status(201).json({ message: 'No valid points in batch', accepted: 0, rejected: pointsCount });
     }
 
     // Note: last two placeholders are is_filtered and a scratch column — we omit original coords
