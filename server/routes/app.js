@@ -72,15 +72,19 @@ router.post('/upload', authorize, requireAdmin, (req, res) => {
       return res.status(400).json({ error: 'No APK file provided' });
     }
 
+    const cleanup = () => {
+      try { if (req.file?.path) fs.unlinkSync(req.file.path); } catch { /* no-op */ }
+    };
+
     const { version, versionCode, releaseNotes } = req.body;
     if (!version || !versionCode) {
-      fs.unlinkSync(req.file.path);
+      cleanup();
       return res.status(400).json({ error: 'version and versionCode are required' });
     }
 
     const parsedCode = parseInt(versionCode, 10);
     if (isNaN(parsedCode) || parsedCode <= 0) {
-      fs.unlinkSync(req.file.path);
+      cleanup();
       return res.status(400).json({ error: 'versionCode must be a positive integer' });
     }
 
@@ -107,6 +111,7 @@ router.post('/upload', authorize, requireAdmin, (req, res) => {
     try {
       fs.writeFileSync(VERSION_FILE, JSON.stringify(versionData, null, 2));
     } catch (writeErr) {
+      cleanup();
       return res.status(500).json({ error: 'Failed to update version file' });
     }
 

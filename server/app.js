@@ -1,5 +1,6 @@
 import dotenv from 'dotenv';
 import express from 'express';
+import { logger } from './logger.js';
 import cors from 'cors';
 import helmet from 'helmet';
 import http from 'http';
@@ -18,7 +19,7 @@ import { initializeUsername } from './db/init-username.js';
 import { initializeUploadAudit } from './db/init-upload-audit.js';
 import { initializeLocationsIndex } from './db/init-locations-index.js';
 import { initializeAdminUser } from './db/init-admin-user.js';
-import { initializeDatabase } from './db/index.js';
+import pool, { initializeDatabase } from './db/index.js';
 import { initializeAttendance } from './db/init-attendance.js';
 import { initializeBatteryColumn } from './db/init-battery.js';
 import { initializeArchive } from './db/init-archive.js';
@@ -30,7 +31,8 @@ import deviceEventRoutes from './routes/device-events.js';
 import stopsRoutes from './routes/stops.js';
 import { migrateGeofenceEvents } from './db/migrate-geofence-events.js';
 import { initializeFcm } from './db/init-fcm.js';
-import pool from './db/index.js';
+import { initializeRefreshTokenVersion } from './db/init-refresh-token-version.js';
+import { initializeBackupRuns } from './db/init-backup-runs.js';
 
 dotenv.config();
 
@@ -45,9 +47,13 @@ for (const key of REQUIRED_ENV) {
 const JWT_SECRET = process.env.JWT_SECRET;
 const app = express();
 const httpServer = http.createServer(app);
+const allowedOrigins = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(',')
+  : ['*'];
+
 const io = new SocketIOServer(httpServer, {
   cors: {
-    origin: '*',
+    origin: allowedOrigins,
     methods: ['GET', 'POST']
   }
 });
@@ -97,21 +103,21 @@ app.get('/health', async (req, res) => {
     await pool.query('SELECT 1');
     res.json({ status: 'ok' });
   } catch (err) {
-    console.error('Health check failed', err);
+    logger.error({ err }, 'Health check failed');
     res.status(500).json({ status: 'error' });
   }
 });
 
 app.use((err, req, res, next) => {
-  console.error('Unhandled error', err);
+  logger.error({ err }, 'Unhandled error');
   res.status(500).json({ error: 'Unexpected server error' });
 });
 
 // Socket.IO connection handler
 io.on('connection', (socket) => {
-  console.log(`User connected: ${socket.id}`);
+  logger.debug({ socketId: socket.id }, 'User connected');
   socket.on('disconnect', () => {
-    console.log(`User disconnected: ${socket.id}`);
+    logger.debug({ socketId: socket.id }, 'User disconnected');
   });
 });
 
@@ -128,119 +134,79 @@ if (process.env.ENABLE_AUTO_BACKUP === 'true') {
   console.log('Auto-backup scheduled for 2:00 AM daily');
 }
 
-// Archive old location data daily at 2 AM
-cron.schedule('0 2 * * *', async () => {
-  try {
-    const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - 90);
-    const result = await pool.query(
-      `WITH moved AS (
-        DELETE FROM locations WHERE received_at < $1 RETURNING *
-      ) INSERT INTO locations_archive SELECT * FROM moved`,
-      [cutoff.toISOString()]
-    );
-    console.log(`Archived ${result.rowCount} old location rows`);
-  } catch (err) {
-    console.error('Location archive job failed:', err.message);
-  }
-});
+// Archive old location data daily at 2:30 AM (staggered 30 min after backup to avoid lock contention)
+if (process.env.ENABLE_ARCHIVE !== 'false') {
+  cron.schedule('30 2 * * *', async () => {
+    try {
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - 90);
+      const result = await pool.query(
+        `WITH moved AS (
+          DELETE FROM locations WHERE received_at < $1 RETURNING *
+        ) INSERT INTO locations_archive SELECT * FROM moved`,
+        [cutoff.toISOString()]
+      );
+      console.log(`Archived ${result.rowCount} old location rows`);
+    } catch (err) {
+      console.error('Location archive job failed:', err.message);
+    }
+  });
+}
 
 const startServer = async () => {
   // Database health check
   try {
     await pool.query('SELECT 1');
-    console.log('✓ Database connection healthy');
+    logger.info('Database connection healthy');
   } catch (err) {
-    console.error('✗ Database connection failed:', err.message);
+    logger.fatal({ err }, 'Database connection failed');
     process.exit(1);
   }
 
+  // Initialize base schema first (in-memory DB only)
   try {
     await initializeDatabase();
   } catch (err) {
     console.error('Failed to initialize database schema:', err.message);
   }
 
-  try {
-    await initializeAdminUser();
-  } catch (err) {
-    console.error('Failed to initialize admin user:', err.message);
-  }
+  // Run independent migrations concurrently to cut startup time
+  await Promise.allSettled([
+    initializeUsername().catch(err => console.error('Failed to initialize username:', err.message)),
+    initializeUploadAudit().catch(err => console.error('Failed to initialize upload audit table:', err.message)),
+    initializeLocationsIndex().catch(err => console.error('Failed to initialize locations index:', err.message)),
+    initializeAttendance().catch(err => console.error('Failed to initialize attendance table:', err.message)),
+    initializeBatteryColumn().catch(err => console.error('Failed to initialize battery column:', err.message)),
+    initializeArchive().catch(err => console.error('Failed to initialize archive table:', err.message)),
+    initializeGeofences().catch(err => console.error('Failed to initialize geofences tables:', err.message)),
+    initializeFcm().catch(err => console.error('Failed to initialize FCM column:', err.message)),
+    initializeAntiCheat().catch(err => console.error('Failed to initialize anti-cheat schema:', err.message)),
+    initializeGpsQuality().catch(err => console.error('Failed to initialize GPS quality columns:', err.message)),
+    initializeRefreshTokenVersion().catch(err => console.error('Failed to initialize refresh token version:', err.message)),
+    initializeBackupRuns().catch(err => console.error('Failed to initialize backup runs table:', err.message)),
+  ]);
 
+  // PostGIS depends on schema existing; geofence events migration depends on geofences table
   try {
-    await initializeUsername();
+    await initializePostGIS();
   } catch (err) {
-    console.error('Failed to initialize username:', err.message);
+    console.error('Failed to initialize PostGIS (non-fatal):', err.message);
   }
-
-  try {
-    await initializeUploadAudit();
-  } catch (err) {
-    console.error('Failed to initialize upload audit table:', err.message);
-  }
-
-  try {
-    await initializeLocationsIndex();
-  } catch (err) {
-    console.error('Failed to initialize locations index:', err.message);
-  }
-
-  try {
-    await initializeAttendance();
-  } catch (err) {
-    console.error('Failed to initialize attendance table:', err.message);
-  }
-
-  try {
-    await initializeBatteryColumn();
-  } catch (err) {
-    console.error('Failed to initialize battery column:', err.message);
-  }
-
-  try {
-    await initializeArchive();
-  } catch (err) {
-    console.error('Failed to initialize archive table:', err.message);
-  }
-
-  try {
-    await initializeGeofences();
-  } catch (err) {
-    console.error('Failed to initialize geofences tables:', err.message);
-  }
-
   try {
     await migrateGeofenceEvents();
   } catch (err) {
     console.error('Failed to migrate geofence_events table:', err.message);
   }
 
+  // Admin user depends on users table being fully migrated
   try {
-    await initializeFcm();
+    await initializeAdminUser();
   } catch (err) {
-    console.error('Failed to initialize FCM column:', err.message);
-  }
-
-  try {
-    await initializeAntiCheat();
-  } catch (err) {
-    console.error('Failed to initialize anti-cheat schema:', err.message);
-  }
-
-  try {
-    await initializePostGIS();
-  } catch (err) {
-    console.error('Failed to initialize PostGIS (non-fatal):', err.message);
-  }
-
-  try {
-    await initializeGpsQuality();
-  } catch (err) {
-    console.error('Failed to initialize GPS quality columns:', err.message);
+    console.error('Failed to initialize admin user:', err.message);
   }
 
   httpServer.listen(port, () => {
-    console.log(`GPS Tracker API listening on port ${port}`);
+    logger.info({ port }, 'GPS Tracker API listening');
   });
 };
 

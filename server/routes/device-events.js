@@ -1,7 +1,8 @@
 import express from 'express';
 import rateLimit from 'express-rate-limit';
-import { query } from '../db/index.js';
+import pool, { query } from '../db/index.js';
 import { authorize, requireAdmin } from '../middleware/auth.js';
+import { logger } from '../logger.js';
 
 const router = express.Router();
 
@@ -40,18 +41,32 @@ router.post('/', eventLimiter, authorize, async (req, res) => {
       });
     }
 
-    for (const row of rows) {
-      await query(
-        `INSERT INTO device_events (user_id, event_type, detail, occurred_at)
-         VALUES ($1, $2, $3, $4)`,
-        [userId, row.event_type, row.detail, row.occurred_at],
-      );
+    if (rows.length === 0) {
+      return res.status(201).json({ message: 'No valid events', count: 0 });
     }
 
-    console.info('Device events recorded', { userId, count: rows.length });
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const placeholders = rows.map((_, i) => `($1, $${i * 3 + 2}, $${i * 3 + 3}, $${i * 3 + 4})`).join(', ');
+      const values = [userId];
+      for (const row of rows) values.push(row.event_type, row.detail, row.occurred_at);
+      await client.query(
+        `INSERT INTO device_events (user_id, event_type, detail, occurred_at) VALUES ${placeholders}`,
+        values,
+      );
+      await client.query('COMMIT');
+    } catch (txErr) {
+      await client.query('ROLLBACK');
+      throw txErr;
+    } finally {
+      client.release();
+    }
+
+    logger.info({ userId, count: rows.length }, 'Device events recorded');
     return res.status(201).json({ message: 'Events recorded', count: rows.length });
   } catch (err) {
-    console.error('Device events error', err);
+    logger.error({ err }, 'Device events error');
     return res.status(500).json({ error: 'Unable to store device events' });
   }
 });
@@ -86,7 +101,7 @@ router.get('/', authorize, requireAdmin, async (req, res) => {
     const result = await query(text, params);
     return res.json({ events: result.rows });
   } catch (err) {
-    console.error('Fetch device events error', err);
+    logger.error({ err }, 'Fetch device events error');
     return res.status(500).json({ error: 'Unable to fetch device events' });
   }
 });

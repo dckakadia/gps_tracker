@@ -129,17 +129,29 @@ export class KalmanFilter {
  * user, giving the Kalman state time to converge. Resets on server restart,
  * which is acceptable — convergence takes only a few points.
  */
-const _filters = new Map();
+const _filters = new Map(); // userId → { filter: KalmanFilter, lastAccessed: number }
 
 /** @returns {KalmanFilter} */
 export function getFilterForUser(userId) {
+  const now = Date.now();
   if (!_filters.has(userId)) {
-    _filters.set(userId, new KalmanFilter());
+    _filters.set(userId, { filter: new KalmanFilter(), lastAccessed: now });
+  } else {
+    _filters.get(userId).lastAccessed = now;
   }
-  return _filters.get(userId);
+  return _filters.get(userId).filter;
 }
 
 /** Clear a user's filter state (e.g. after a long gap in tracking). */
 export function resetFilterForUser(userId) {
   _filters.delete(userId);
 }
+
+// Purge filters idle for >24 h once per hour so the map doesn't grow unboundedly
+// .unref() prevents this timer from keeping the Node process alive on shutdown.
+setInterval(() => {
+  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+  for (const [uid, entry] of _filters) {
+    if (entry.lastAccessed < cutoff) _filters.delete(uid);
+  }
+}, 60 * 60 * 1000).unref();

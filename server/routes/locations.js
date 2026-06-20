@@ -1,7 +1,8 @@
 import express from 'express';
 import rateLimit from 'express-rate-limit';
 import { query } from '../db/index.js';
-import { authorize, requireAdmin } from '../middleware/auth.js';
+import { logger } from '../logger.js';
+import { authorize, authorizeForExport, requireAdmin } from '../middleware/auth.js';
 import { getFilterForUser, resetFilterForUser } from '../utils/kalmanFilter.js';
 import { validateGPSPoint } from '../utils/gpsValidator.js';
 import { snapToRoads } from '../utils/roadSnapper.js';
@@ -25,9 +26,9 @@ let postgisAvailable = false;
   try {
     await query("SELECT PostGIS_Version()");
     postgisAvailable = true;
-    console.log('locations.js: PostGIS available — using ST_DWithin for geofence checks');
+    logger.info('PostGIS available — using ST_DWithin for geofence checks');
   } catch {
-    console.log('locations.js: PostGIS not available — using in-process Haversine fallback');
+    logger.info('PostGIS not available — using in-process Haversine fallback');
   }
 })();
 
@@ -122,13 +123,13 @@ router.post('/', uploadLimiter, authorize, async (req, res) => {
               accuracy, speed, heading } = point;
 
       if (typeof latitude !== 'number' || typeof longitude !== 'number' || !recorded_at) {
-        console.warn('Skipping invalid point', { index, point });
+        logger.warn({ index }, 'Skipping invalid point');
         continue;
       }
 
       let recordedAtIso;
       try { recordedAtIso = new Date(recorded_at).toISOString(); }
-      catch { console.warn('Invalid timestamp', { index, recorded_at }); continue; }
+      catch { logger.warn({ index, recorded_at }, 'Invalid timestamp'); continue; }
 
       const tsMs      = new Date(recordedAtIso).getTime();
       const spoofed   = is_spoofed === true;
@@ -149,13 +150,13 @@ router.post('/', uploadLimiter, authorize, async (req, res) => {
 
         if (!vResult.valid && vResult.severity === 'hard') {
           // True GPS teleport — discard silently
-          console.info('GPS point hard-rejected', { userId, index, reason: vResult.reason });
+          logger.info({ userId, index, reason: vResult.reason }, 'GPS point hard-rejected');
           continue;
         }
 
         if (!vResult.valid && vResult.severity === 'soft') {
           // Low accuracy — save raw point flagged as filtered, skip Kalman
-          console.info('GPS point soft-rejected (saved as filtered)', { userId, index, reason: vResult.reason });
+          logger.info({ userId, index, reason: vResult.reason }, 'GPS point soft-rejected (saved as filtered)');
           isFiltered = true;
         } else {
           // Good point — run Kalman smoothing
@@ -223,11 +224,10 @@ router.post('/', uploadLimiter, authorize, async (req, res) => {
       cleanValues,
     );
 
-    // ── Attendance (non-spoofed only) ─────────────────────────────────────────
-    const realTs = points
-      .filter(p => !p.is_spoofed && p.recorded_at)
-      .map(p => { try { return new Date(p.recorded_at).toISOString(); } catch { return null; } })
-      .filter(Boolean);
+    // ── Attendance (non-spoofed, validated points only) ───────────────────────
+    // validTs is populated inside the validation loop above — only timestamps
+    // that passed hard-reject and spoofing checks reach this array.
+    const realTs = validTs;
 
     if (realTs.length) {
       try {
@@ -238,7 +238,7 @@ router.post('/', uploadLimiter, authorize, async (req, res) => {
              SET check_out = EXCLUDED.check_out, updated_at = NOW()`,
           [userId, realTs[0], realTs[realTs.length - 1]],
         );
-      } catch (err) { console.error('Attendance upsert failed', err); }
+      } catch (err) { logger.error({ err }, 'Attendance upsert failed'); }
     }
 
     // ── Geofence checks (non-spoofed only) ───────────────────────────────────
@@ -254,85 +254,111 @@ router.post('/', uploadLimiter, authorize, async (req, res) => {
         const allGeofences = await getAllGeofences();
 
         if (allGeofences.length > 0) {
+          // Load all geofence state for this user in one query (ARCH-2)
+          const stateRes = await query(
+            `SELECT geofence_id, inside, exit_pending_since, exit_pending_lat, exit_pending_lng
+             FROM user_geofence_state WHERE user_id = $1`,
+            [userId],
+          );
+          const stateMap = new Map(stateRes.rows.map(r => [r.geofence_id, r]));
+
+          // Deduplicate PostGIS calls by coordinate (BUG-3)
+          const coordKey = p => `${p.latitude.toFixed(5)},${p.longitude.toFixed(5)}`;
+          const insideCache = new Map();
+
+          // Accumulate state mutations and events; flush in one transaction at end
+          const stateUpserts = [];  // { geofence_id, inside, exit_pending_since, exit_pending_lat, exit_pending_lng }
+          const eventInserts = [];  // { geofence_id, event_type }
+          const socketEmits  = [];  // { geofence_id, event }
+
           for (const point of realPoints) {
             const { latitude, longitude } = point;
-            const insideGeofences = postgisAvailable
-              ? await getGeofencesContaining(latitude, longitude)
-              : allGeofences.filter(gf =>
-                  haversine(latitude, longitude, gf.latitude, gf.longitude) * 1000 <= gf.radius_meters,
-                );
+            const key = coordKey(point);
 
-            const insideIds = new Set(insideGeofences.map(g => g.id));
+            if (!insideCache.has(key)) {
+              const inside = postgisAvailable
+                ? await getGeofencesContaining(latitude, longitude)
+                : allGeofences.filter(gf =>
+                    haversine(latitude, longitude, gf.latitude, gf.longitude) * 1000 <= gf.radius_meters,
+                  );
+              insideCache.set(key, new Set(inside.map(g => g.id)));
+            }
+            const insideIds = insideCache.get(key);
 
             for (const gf of allGeofences) {
-              const isInside = insideIds.has(gf.id);
-              const stateRes = await query(
-                `SELECT inside, exit_pending_since, exit_pending_lat, exit_pending_lng
-                 FROM user_geofence_state WHERE user_id = $1 AND geofence_id = $2`,
-                [userId, gf.id],
-              );
-              const row         = stateRes.rows[0];
+              const isInside    = insideIds.has(gf.id);
+              const row         = stateMap.get(gf.id);
               const prevInside  = row?.inside ?? false;
               const pendingSince = row?.exit_pending_since ?? null;
 
               if (isInside && !prevInside && !pendingSince) {
-                await query(
-                  `INSERT INTO user_geofence_state (user_id, geofence_id, inside, exit_pending_since, exit_pending_lat, exit_pending_lng)
-                   VALUES ($1,$2,TRUE,NULL,NULL,NULL)
-                   ON CONFLICT (user_id, geofence_id) DO UPDATE
-                     SET inside=TRUE, exit_pending_since=NULL, exit_pending_lat=NULL, exit_pending_lng=NULL`,
-                  [userId, gf.id],
-                );
-                await query('INSERT INTO geofence_events (user_id, geofence_id, event_type) VALUES ($1,$2,$3)',
-                  [userId, gf.id, 'enter']);
-                if (io) io.emit('geofence:alert', { user_id: userId, geofence_id: gf.id, event: 'enter' });
+                stateMap.set(gf.id, { geofence_id: gf.id, inside: true, exit_pending_since: null, exit_pending_lat: null, exit_pending_lng: null });
+                stateUpserts.push({ geofence_id: gf.id, inside: true, exit_pending_since: null, exit_pending_lat: null, exit_pending_lng: null });
+                eventInserts.push({ geofence_id: gf.id, event_type: 'enter' });
+                socketEmits.push({ geofence_id: gf.id, event: 'enter' });
 
               } else if (!isInside && prevInside && !pendingSince) {
-                await query(
-                  `INSERT INTO user_geofence_state (user_id, geofence_id, inside, exit_pending_since, exit_pending_lat, exit_pending_lng)
-                   VALUES ($1,$2,TRUE,NOW(),$3,$4)
-                   ON CONFLICT (user_id, geofence_id) DO UPDATE
-                     SET exit_pending_since=NOW(), exit_pending_lat=$3, exit_pending_lng=$4`,
-                  [userId, gf.id, latitude, longitude],
-                );
+                const now = new Date().toISOString();
+                stateMap.set(gf.id, { geofence_id: gf.id, inside: true, exit_pending_since: now, exit_pending_lat: latitude, exit_pending_lng: longitude });
+                stateUpserts.push({ geofence_id: gf.id, inside: true, exit_pending_since: now, exit_pending_lat: latitude, exit_pending_lng: longitude });
 
               } else if (!isInside && prevInside && pendingSince) {
-                const elapsedMs   = Date.now() - new Date(pendingSince).getTime();
-                const distCenter  = haversine(latitude, longitude, gf.latitude, gf.longitude) * 1000;
-                const extra       = distCenter - gf.radius_meters;
+                const elapsedMs  = Date.now() - new Date(pendingSince).getTime();
+                const distCenter = haversine(latitude, longitude, gf.latitude, gf.longitude) * 1000;
+                const extra      = distCenter - gf.radius_meters;
                 if (elapsedMs >= EXIT_DEBOUNCE_MS || extra >= EXIT_DEBOUNCE_EXTRA_M) {
-                  await query(
-                    `INSERT INTO user_geofence_state (user_id, geofence_id, inside, exit_pending_since, exit_pending_lat, exit_pending_lng)
-                     VALUES ($1,$2,FALSE,NULL,NULL,NULL)
-                     ON CONFLICT (user_id, geofence_id) DO UPDATE
-                       SET inside=FALSE, exit_pending_since=NULL, exit_pending_lat=NULL, exit_pending_lng=NULL`,
-                    [userId, gf.id],
-                  );
-                  await query('INSERT INTO geofence_events (user_id, geofence_id, event_type) VALUES ($1,$2,$3)',
-                    [userId, gf.id, 'exit']);
-                  if (io) io.emit('geofence:alert', { user_id: userId, geofence_id: gf.id, event: 'exit' });
+                  stateMap.set(gf.id, { geofence_id: gf.id, inside: false, exit_pending_since: null, exit_pending_lat: null, exit_pending_lng: null });
+                  stateUpserts.push({ geofence_id: gf.id, inside: false, exit_pending_since: null, exit_pending_lat: null, exit_pending_lng: null });
+                  eventInserts.push({ geofence_id: gf.id, event_type: 'exit' });
+                  socketEmits.push({ geofence_id: gf.id, event: 'exit' });
                 }
 
               } else if (isInside && prevInside && pendingSince) {
-                await query(
-                  `UPDATE user_geofence_state
-                   SET exit_pending_since=NULL, exit_pending_lat=NULL, exit_pending_lng=NULL
-                   WHERE user_id=$1 AND geofence_id=$2`,
-                  [userId, gf.id],
-                );
+                stateMap.set(gf.id, { ...row, exit_pending_since: null, exit_pending_lat: null, exit_pending_lng: null });
+                stateUpserts.push({ geofence_id: gf.id, inside: true, exit_pending_since: null, exit_pending_lat: null, exit_pending_lng: null });
 
-              } else if (!isInside && !prevInside && !pendingSince) {
-                await query(
-                  `INSERT INTO user_geofence_state (user_id, geofence_id, inside)
-                   VALUES ($1,$2,FALSE) ON CONFLICT DO NOTHING`,
-                  [userId, gf.id],
+              } else if (!isInside && !prevInside && !pendingSince && !row) {
+                stateMap.set(gf.id, { geofence_id: gf.id, inside: false, exit_pending_since: null, exit_pending_lat: null, exit_pending_lng: null });
+                stateUpserts.push({ geofence_id: gf.id, inside: false, exit_pending_since: null, exit_pending_lat: null, exit_pending_lng: null });
+              }
+            }
+          }
+
+          // Flush all state changes and events in a single transaction
+          if (stateUpserts.length > 0 || eventInserts.length > 0) {
+            const client = await (await import('../db/index.js')).default.connect();
+            try {
+              await client.query('BEGIN');
+              for (const u of stateUpserts) {
+                await client.query(
+                  `INSERT INTO user_geofence_state (user_id, geofence_id, inside, exit_pending_since, exit_pending_lat, exit_pending_lng)
+                   VALUES ($1,$2,$3,$4,$5,$6)
+                   ON CONFLICT (user_id, geofence_id) DO UPDATE
+                     SET inside=$3, exit_pending_since=$4, exit_pending_lat=$5, exit_pending_lng=$6`,
+                  [userId, u.geofence_id, u.inside, u.exit_pending_since, u.exit_pending_lat, u.exit_pending_lng],
                 );
               }
+              for (const e of eventInserts) {
+                await client.query(
+                  'INSERT INTO geofence_events (user_id, geofence_id, event_type) VALUES ($1,$2,$3)',
+                  [userId, e.geofence_id, e.event_type],
+                );
+              }
+              await client.query('COMMIT');
+            } catch (txErr) {
+              await client.query('ROLLBACK');
+              throw txErr;
+            } finally {
+              client.release();
+            }
+
+            for (const s of socketEmits) {
+              if (io) io.emit('geofence:alert', { user_id: userId, geofence_id: s.geofence_id, event: s.event });
             }
           }
         }
       } catch (geofenceErr) {
-        console.error('Geofence check failed', geofenceErr);
+        logger.error({ err: geofenceErr }, 'Geofence check failed');
       }
     }
 
@@ -364,7 +390,7 @@ router.post('/', uploadLimiter, authorize, async (req, res) => {
           }
         }
       } catch (stopErr) {
-        console.error('Background stop detection failed', stopErr);
+        logger.error({ err: stopErr }, 'Background stop detection failed');
       }
     });
 
@@ -390,12 +416,12 @@ router.post('/', uploadLimiter, authorize, async (req, res) => {
         if (latest.rows[0]) io.emit('location:uploaded', latest.rows[0]);
       }
     } catch (emitErr) {
-      console.error('Socket emit failed', emitErr);
+      logger.error({ err: emitErr }, 'Socket emit failed');
     }
 
     return res.status(201).json({ message: 'Location points accepted', accepted: validCount, rejected: pointsCount - validCount });
   } catch (err) {
-    console.error('Upload locations error', err);
+    logger.error({ err, userId }, 'Upload locations error');
     await createUploadAudit({
       userId, pointsCount, validPointsCount: 0,
       status: 'error', errorMessage: err.message, ipAddress, requestBody: req.body,
@@ -427,7 +453,7 @@ router.get('/latest', authorize, requireAdmin, async (req, res) => {
     );
     return res.json({ locations: result.rows });
   } catch (err) {
-    console.error('Fetch latest locations error', err);
+    logger.error({ err }, 'Fetch latest locations error');
     return res.status(500).json({ error: 'Unable to fetch latest locations' });
   }
 });
@@ -456,23 +482,30 @@ router.get('/history/:userId', authorize, requireAdmin, async (req, res) => {
 
     let history = result.rows;
 
+    let snapWarning;
     if (doSnap && history.length >= 2) {
       try {
         const raw = history.map(r => ({ lat: parseFloat(r.latitude), lng: parseFloat(r.longitude) }));
         const snapped = await snapToRoads(raw);
-        history = history.map((row, i) => ({
-          ...row,
-          latitude_snapped:  snapped[i]?.lat ?? row.latitude,
-          longitude_snapped: snapped[i]?.lng ?? row.longitude,
-        }));
+        if (snapped.length !== raw.length) {
+          console.warn(`OSRM returned ${snapped.length} points for ${raw.length} input — skipping snap`);
+          snapWarning = 'Road snap point count mismatch; returning raw coordinates';
+        } else {
+          history = history.map((row, i) => ({
+            ...row,
+            latitude_snapped:  snapped[i].lat,
+            longitude_snapped: snapped[i].lng,
+          }));
+        }
       } catch (e) {
-        console.warn('Route snap failed, returning raw:', e.message);
+        logger.warn({ err: e }, 'Route snap failed, returning raw');
+        snapWarning = 'Road snap failed; returning raw coordinates';
       }
     }
 
-    return res.json({ history });
+    return res.json({ history, ...(snapWarning ? { snap_warning: snapWarning } : {}) });
   } catch (err) {
-    console.error('Fetch location history error', err);
+    logger.error({ err }, 'Fetch location history error');
     return res.status(500).json({ error: 'Unable to fetch location history' });
   }
 });
@@ -615,7 +648,7 @@ function csvEscape(value) {
   return /[",\n]/.test(str) ? '"' + str.replace(/"/g, '""') + '"' : str;
 }
 
-router.get('/history/:userId/export', authorize, requireAdmin, async (req, res) => {
+router.get('/history/:userId/export', authorizeForExport, requireAdmin, async (req, res) => {
   const userId = parseInt(req.params.userId, 10);
   if (isNaN(userId)) return res.status(400).json({ error: 'Invalid user ID' });
 

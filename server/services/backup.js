@@ -2,6 +2,7 @@ import { spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { logger } from '../logger.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -140,6 +141,7 @@ async function performBackup(io) {
 
   const timestamp = new Date().toISOString();
 
+  let dbDumpFile = null;
   try {
     // Create local JSON backup
     emit('Creating local backup...', { overallPct: 1, stageLabel: 'Stage 1 / 3' });
@@ -150,23 +152,29 @@ async function performBackup(io) {
 
     // Stage 1: Dump PostgreSQL database
     emit('Dumping PostgreSQL database...', { overallPct: 2, stageLabel: 'Stage 1 / 3' });
-    const dbDumpFile = path.join(BACKUPS_DIR, `db_dump_${dateStr}_${Date.now()}.sql`);
+    dbDumpFile = path.join(BACKUPS_DIR, `db_dump_${dateStr}_${Date.now()}.sql`);
     const databaseUrl = process.env.DATABASE_URL;
-    
+
     if (!databaseUrl) {
       throw new Error('DATABASE_URL not set');
     }
 
-    // Use pg_dump with spawn to avoid shell injection
     await new Promise((resolve, reject) => {
       const proc = spawn('pg_dump', ['--file', dbDumpFile, databaseUrl], { stdio: ['ignore', 'ignore', 'pipe'] });
       let stderr = '';
+
+      const timeout = setTimeout(() => {
+        proc.kill('SIGTERM');
+        reject(new Error('pg_dump timed out after 10 minutes'));
+      }, 10 * 60 * 1000);
+
       proc.stderr.on('data', (d) => { stderr += d.toString(); });
       proc.on('close', (code) => {
+        clearTimeout(timeout);
         if (code === 0) resolve();
         else reject(new Error(`pg_dump failed (code ${code}): ${stderr.slice(0, 500)}`));
       });
-      proc.on('error', (e) => reject(new Error(`Failed to start pg_dump: ${e.message}`)));
+      proc.on('error', (e) => { clearTimeout(timeout); reject(new Error(`Failed to start pg_dump: ${e.message}`)); });
     });
     emit('Database dumped', { overallPct: 5, stageLabel: 'Stage 1 / 3' });
 
@@ -182,9 +190,6 @@ async function performBackup(io) {
       }
     );
     emit('Database dump uploaded', { overallPct: 46, stageLabel: 'Stage 2 / 3' });
-
-    // Clean up local dump after upload
-    fs.unlinkSync(dbDumpFile);
 
     // Stage 3: Uploads folder (47-93%)
     let uploadExists = fs.existsSync(uploadsPath);
@@ -230,7 +235,7 @@ async function performBackup(io) {
       const stat = fs.statSync(filePath);
       if (stat.mtime < thirtyDaysAgo) {
         fs.unlinkSync(filePath);
-        console.log(`Deleted old backup: ${file}`);
+        logger.info({ file }, 'Deleted old backup');
       }
     }
 
@@ -241,16 +246,21 @@ async function performBackup(io) {
       timestamp
     });
 
-    console.log('Backup completed successfully at', timestamp);
+    logger.info({ timestamp }, 'Backup completed successfully');
     return timestamp;
   } catch (error) {
-    console.error('Backup error:', error.message);
+    logger.error({ err: error }, 'Backup error');
     emit('Backup failed', {
       status: 'failed',
       error: error.message,
       overallPct: 0
     });
     throw error;
+  } finally {
+    // Always clean up the dump file, whether upload succeeded or failed (LEAK-3)
+    if (dbDumpFile) {
+      try { fs.unlinkSync(dbDumpFile); } catch { /* ignore cleanup error */ }
+    }
   }
 }
 

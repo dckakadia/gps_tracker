@@ -3,6 +3,7 @@ import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import dotenv from 'dotenv';
 import { query } from '../db/index.js';
+import { logger } from '../logger.js';
 
 dotenv.config();
 const router = express.Router();
@@ -20,7 +21,7 @@ router.post('/login', async (req, res) => {
     }
 
     const result = await query(
-      'SELECT id, name, email, password_hash, role FROM users WHERE email = $1 OR name = $1 OR LOWER(name) = LOWER($1) OR id::text = $1',
+      'SELECT id, name, email, password_hash, role, refresh_token_version FROM users WHERE email = $1 OR name = $1 OR LOWER(name) = LOWER($1) OR id::text = $1',
       [loginIdentifier]
     );
     const user = result.rows[0];
@@ -37,12 +38,17 @@ router.post('/login', async (req, res) => {
       expiresIn: JWT_EXPIRES_IN,
     });
 
-    // Issue a refresh token (stateless) so clients can obtain a new access token
-    const refreshToken = jwt.sign({ id: user.id }, REFRESH_SECRET, { expiresIn: REFRESH_EXPIRES_IN });
+    // Embed refresh_token_version so the token can be revoked by incrementing
+    // the column in users (e.g. when an admin deletes or disables the account).
+    const refreshToken = jwt.sign(
+      { id: user.id, rtv: user.refresh_token_version ?? 0 },
+      REFRESH_SECRET,
+      { expiresIn: REFRESH_EXPIRES_IN }
+    );
 
     return res.json({ token, refreshToken, user: { id: user.id, name: user.name, email: user.email, role: user.role } });
   } catch (err) {
-    console.error('Login error:', err.message, err.stack);
+    logger.error({ err }, 'Login error');
     return res.status(500).json({ error: 'Server error during login' });
   }
 });
@@ -60,10 +66,18 @@ router.post('/refresh', async (req, res) => {
       return res.status(401).json({ error: 'Invalid refresh token' });
     }
 
-    // Ensure the user still exists
-    const result = await query('SELECT id, name, email, role FROM users WHERE id = $1', [payload.id]);
+    // Verify the token version matches — admin can revoke all sessions by
+    // incrementing refresh_token_version in the users table.
+    const result = await query(
+      'SELECT id, name, email, role, refresh_token_version FROM users WHERE id = $1',
+      [payload.id]
+    );
     const user = result.rows[0];
     if (!user) return res.status(401).json({ error: 'Invalid refresh token (user not found)' });
+
+    if ((user.refresh_token_version ?? 0) !== (payload.rtv ?? 0)) {
+      return res.status(401).json({ error: 'Refresh token has been revoked' });
+    }
 
     const newToken = jwt.sign({ id: user.id, name: user.name, email: user.email, role: user.role }, JWT_SECRET, {
       expiresIn: JWT_EXPIRES_IN,
@@ -71,7 +85,7 @@ router.post('/refresh', async (req, res) => {
 
     return res.json({ token: newToken });
   } catch (err) {
-    console.error('Refresh token error:', err.message, err.stack);
+    logger.error({ err }, 'Refresh token error');
     return res.status(500).json({ error: 'Server error during token refresh' });
   }
 });

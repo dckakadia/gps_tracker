@@ -14,9 +14,17 @@
 import http  from 'http';
 import https from 'https';
 
-const OSRM_BASE = process.env.OSRM_BASE_URL || 'http://router.project-osrm.org';
+const OSRM_BASE = process.env.OSRM_BASE_URL || null;
 const OSRM_TIMEOUT_MS = 8_000;
 const CHUNK_SIZE = 100; // OSRM match API limit per request
+
+if (!OSRM_BASE) {
+  console.warn(
+    '⚠ OSRM_BASE_URL not set — road snapping disabled. ' +
+    'Set OSRM_BASE_URL to a self-hosted OSRM instance. ' +
+    'Using the public demo (http://router.project-osrm.org) leaks route data to a third party.'
+  );
+}
 
 function fetchJson(url) {
   return new Promise((resolve, reject) => {
@@ -77,7 +85,7 @@ async function snapChunk(points) {
  * @returns {Promise<Array<{lat: number, lng: number}>>}
  */
 export async function snapToRoads(points) {
-  if (points.length < 2) return points;
+  if (!OSRM_BASE || points.length < 2) return points;
 
   const snapped = [];
   for (let i = 0; i < points.length; i += CHUNK_SIZE) {
