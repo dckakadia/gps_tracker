@@ -36,7 +36,10 @@ import { initializeBackupRuns } from './db/init-backup-runs.js';
 
 dotenv.config();
 
-const REQUIRED_ENV = ['DATABASE_URL', 'JWT_SECRET', 'PORT'];
+const inMemory = process.env.USE_IN_MEMORY_DB === 'true';
+const REQUIRED_ENV = inMemory
+  ? ['JWT_SECRET', 'PORT']
+  : ['DATABASE_URL', 'JWT_SECRET', 'PORT'];
 for (const key of REQUIRED_ENV) {
   if (!process.env[key]) {
     console.error(`MISSING ENV: ${key} is required`);
