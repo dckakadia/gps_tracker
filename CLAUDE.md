@@ -54,23 +54,40 @@ The server uses ES modules (`"type": "module"` in package.json). All imports mus
 - `POST /api/auth/login` — accepts email, username, name, or user ID as `identifier`
 - `POST /api/auth/refresh` — stateless refresh token exchange
 - `GET /api/admin/*` — admin-only user management and attendance
-- `POST /api/locations` — batch location upload (any authenticated user); triggers attendance upsert, geofence check, and Socket.IO `location:uploaded` broadcast
+- `POST /api/locations` — batch location upload (any authenticated user); runs Kalman filter + GPS validation pipeline; triggers attendance upsert, geofence check (PostGIS ST_DWithin), background stop detection, and Socket.IO `location:uploaded` broadcast. **Never returns 422** — always 201 even if GPS quality is poor.
 - `GET /api/locations/latest` — latest location per non-admin user
-- `GET /api/locations/history/:userId` — day-scoped history
+- `GET /api/locations/history/:userId` — day-scoped history; `?snap=true` adds OSRM-snapped coordinates
 - `GET /api/locations/history/:userId/export` — CSV export (supports `?token=` query param for browser downloads)
+- `POST /api/locations/snap-route` — OSRM road-snap a user's full day route
+- `GET /api/routes/summary` — PostGIS ST_MakeLine+ST_Length distance, speed stats, stop count
 - `GET /api/users/status` — online/offline status (last seen within 30 min)
 - `POST /api/users/notify` — sends FCM push to a user
 - `POST /api/users/fcm-token` — registers FCM token (any authenticated user, not admin-only)
 - `GET /api/app/version`, `POST /api/app/upload` — APK distribution
 - `GET /api/app/download/:filename` — public APK download (no auth required)
 - `GET|POST /api/geofences/*` — geofence CRUD and events
+- `GET /api/stops` — stop list for a user+date; `?compute=true` runs live detection
+- `POST /api/stops/detect` — trigger stop detection, persist results
+- `GET|POST /api/device-events` — tamper/system event audit log (GPS off, airplane mode, shutdown)
 - `GET|POST /api/backup/*` — manual backup trigger
 
 **Auth middleware** (`middleware/auth.js`): `authorize` checks `Authorization: Bearer <token>` header or `?token=` query param. `requireAdmin` gates admin endpoints. Socket.IO also validates JWT on connection, admin-only.
 
-**Geofence logic**: On every location upload, all geofences are checked via in-process haversine. State is tracked in `user_geofence_state`. Entry/exit emits `geofence:alert` via Socket.IO.
+**GPS quality pipeline** (runs on every upload in `routes/locations.js`):
+1. **GPS validator** (`utils/gpsValidator.js`) — two-tier rejection:
+   - *Hard reject* (severity: `'hard'`): implied speed between consecutive points > 150 km/h — true GPS teleport, point discarded
+   - *Soft reject* (severity: `'soft'`): accuracy > 150 m — point saved to DB with `is_filtered=true`, Kalman skipped
+   - Good points get Kalman smoothed and stored with `is_filtered=false`
+   - **Never return HTTP 422** — a batch with 0 storable points returns `201 { accepted: 0 }`
+2. **Kalman filter** (`utils/kalmanFilter.js`) — constant-velocity model per user, resets after 10 min gap
+3. **Stop detection** (`utils/stopDetector.js`) — runs via `setImmediate` after each upload; speed < 5 km/h for ≥ 2 min = stop
+4. **Road snapper** (`utils/roadSnapper.js`) — OSRM map-matching, chunked at 100 pts, graceful fallback
 
-**Archive job**: Runs at 2 AM daily — moves `locations` rows older than 90 days to `locations_archive`.
+**Geofence logic**: PostGIS `ST_DWithin` (O(log N) with GiST index) when PostGIS is available, Haversine fallback otherwise. Exit events are debounced — 3 min OR 30 m beyond boundary before confirming exit. State in `user_geofence_state` (has `exit_pending_since` / `exit_pending_lat` / `exit_pending_lng` columns).
+
+**Anti-spoofing**: `is_spoofed=true` points are stored for audit but skipped for attendance, geofence checks, and stop detection. Spoofing detected via `isMockLocationProvider` (Android) and GPS hardware time vs system clock drift.
+
+**Archive job**: Runs at 2 AM daily — moves `locations` rows older than 90 days to `locations_archive`. Both tables have identical column schemas (13 columns as of v1.3.0) — **if you add a column to `locations`, also add it to `locations_archive`** or the archive job will fail with "INSERT has more expressions than target columns".
 
 **Geofence event persistence**: On every location upload, all geofences are checked via in-process haversine. State is tracked in `user_geofence_state`. When `isInside !== prevInside` (boundary crossing detected), a row is inserted into `geofence_events` (`event_type`: `'enter'` or `'exit'`) AND a `geofence:alert` Socket.IO event is emitted. Both must stay in sync — if you touch the geofence block in `routes/locations.js`, ensure the DB insert and the socket emit both fire on every crossing.
 
@@ -135,11 +152,11 @@ curl -X POST http://116.74.77.22:8095/api/app/upload \
   -F "apk=@app/build/outputs/apk/release/app-release.apk;type=application/vnd.android.package-archive"
 ```
 
-**Current published version:** `1.1.1` (versionCode 111) — check-in time + elapsed hours on home screen; notification inbox (bell icon in header).
+**Current published version:** `1.3.0` (versionCode 130).
 
 **First install on a new device (no USB):** Share the direct download link via WhatsApp/email:
 ```
-http://116.74.77.22:8095/api/app/download/gpstracker_ver_1_1_1.apk
+http://116.74.77.22:8095/api/app/download/gpstracker_ver_1_3_0.apk
 ```
 User opens in browser, enables "Install from unknown sources" once, installs. All future updates are automatic via in-app OTA.
 
@@ -153,7 +170,11 @@ User opens in browser, enables "Install from unknown sources" once, installs. Al
 5. On network failure or auth error: points are persisted to Room DB via `LocationDao`, and `SyncWorker` is enqueued via WorkManager to retry when connectivity returns.
 6. `ApiClient.ensureFreshToken()` proactively refreshes the JWT 5 minutes before expiry. On 401 or refresh failure, clears credentials and shows a notification.
 
-**Adaptive motion state machine (as of v1.0.9):**
+**Android app version history:** v1.0.x — basic tracking; v1.1.x — attendance + OTA; v1.2.0 — anti-spoofing, AlarmManager fallback, Activity Recognition, system event audit; v1.3.0 — Room DB v3 migration (accuracy/speed/bearing columns), sends quality fields in upload payload.
+
+**Room DB version:** 3 (as of v1.3.0). Migration 2→3 adds `accuracy REAL`, `speed REAL`, `bearing REAL` columns with `DEFAULT -1` to `offline_locations`. Always add a `Migration(N, N+1)` object and pass it to `Room.databaseBuilder(...).addMigrations(...)` when bumping the version.
+
+**Adaptive motion state machine (as of v1.2.0):**
 
 `TrackingService` runs a two-state machine: `MOVING` and `STATIONARY`.
 
@@ -212,9 +233,11 @@ TrackingService.isMotionSensorAvailable // set once in onCreate
 - `DebugActivity` — new "Tracking State" card (`tvTrackingState`, `tvMotionSensor`, `tvNextHeartbeat`) updated every 2 s with live state, sensor arm status, and `HH:MM:SS` countdown to next heartbeat.
 - `activity_debug.xml` — tracking state card inserted between GPS Info and Server Status cards.
 
-**Remaining work (Task 3 — not yet implemented):**
-- Create `TrackingServiceTest.kt` in `app/src/test/` with Level 1 JUnit tests for `headingDiff()` (5 cases: straight road, wraparound turn, 180°, boundary at 15°, boundary at 16°) and stationary timeout logic. No Android context needed — pure JVM.
-- Level 2 (Robolectric) and Level 3 (on-device) tests outlined in memory file `tracking-service-state-machine.md`.
+**Anti-spoofing (v1.2.0+):**
+- `isMockLocationProvider` check on every GPS fix; `trustedTimestampMs()` compares GPS hardware time vs system clock — drift > 5 s → `is_spoofed = true`
+- `SystemEventReceiver` catches `GPS_DISABLED`, `AIRPLANE_MODE_ON`, `BOOT_COMPLETED`, `SHUTDOWN` — persisted to `SystemEventEntity` (Room), synced to server as `POST /api/device-events`
+- `ActivityTransitionReceiver` — Activity Recognition API transitions (STILL/IN_VEHICLE etc.) wake the service from STATIONARY
+- `StationaryWakeReceiver` — AlarmManager 15-min fallback for devices without `TYPE_SIGNIFICANT_MOTION`
 
 **`ServiceWatchdogWorker`** (15-min periodic) is state-safe — checks process liveness, not GPS activity, so it will not falsely restart a correctly sleeping service.
 
@@ -263,12 +286,14 @@ flutter build web --release                                               # prod
 
 Single-page Flutter web app. Auth state is stored in static `AuthState.token`. All API calls go through `ApiService` — `baseUrl` defaults to `/api` (relative, for same-origin nginx proxying) and can be overridden at build time via `--dart-define=API_URL=...`.
 
+**Dart SDK constraint:** `>=3.0.0 <4.0.0` (required for Dart records syntax used in speed legend). Do not lower this.
+
 **Screen structure** (all under `lib/screens/`):
 - `DashboardScreen` — tabbed container with: Map, Users, History, Attendance, Geofences, Events, Backup, App Management, Admin Control
 - `MapScreen` — live map using `flutter_map`; uses Socket.IO (`socket_io_client`) to receive `location:uploaded` events for real-time updates
-- `HistoryScreen` — day-scoped location replay with CSV export
+- `HistoryScreen` — day-scoped location replay; speed-colored polyline segments (green/amber/orange/red by km/h), stop markers with duration label, accuracy circle around replay dot, smooth 50ms interpolated replay with heading rotation, server-side summary row (distance/speed/stops)
 - `AttendanceScreen` — check-in/check-out times from the `attendance` table
-- `GeofenceScreen` — CRUD for geofences, map-based placement
+- `GeofenceScreen` — CRUD for geofences, map-based placement. **Draw mode stays active after placing a zone** so multiple zones can be tapped in one session — press Cancel to exit. The `onTap` callback must NOT call `setState(_drawMode=false)` synchronously because `_createGeofence` is async and the dialog hasn't resolved yet.
 - `BackupScreen` — trigger/monitor Google Drive backups
 - `AppManagementScreen` — APK upload and version management (requires nginx `client_max_body_size 100m`)
 
@@ -325,3 +350,38 @@ Users must hard-refresh (`Ctrl+Shift+R`) after deploys to clear the cached Flutt
 The server runs on Ubuntu with nginx as a reverse proxy. The Flutter web build is served as static files by the same nginx instance. See `docs/DEPLOYMENT_RUNBOOK.md` for full server setup and `server/deploy_ubuntu.sh` for the automated deploy script.
 
 **APK distribution flow:** Admin uploads APK → stored in `server/uploads/apks/` → `version.json` updated → all installed apps auto-prompt on next launch → user taps Update Now → `DownloadManager` downloads → `FileProvider` installs silently.
+
+---
+
+## DB Schema (key tables as of v1.3.0)
+
+**`locations`** — 13 columns: `id, user_id, latitude, longitude, recorded_at, received_at, battery_level, is_spoofed, accuracy, speed, heading, is_filtered, stop_id`
+- `is_filtered` = true when Kalman moved the point OR accuracy was too poor for Kalman (soft-rejected)
+- `stop_id` FK → `stops.id` (nullable)
+
+**`locations_archive`** — identical schema to `locations` (13 columns). Archive job runs at 2 AM and copies rows older than 90 days. **Must stay in sync with `locations`.**
+
+**`stops`** — `id, user_id, start_time, end_time, lat, lng, duration_seconds`
+
+**`device_events`** — `id, user_id, event_type, occurred_at, metadata` — tamper audit (GPS off, airplane mode, shutdown, mock location)
+
+**`user_geofence_state`** — `user_id, geofence_id, inside, exit_pending_since, exit_pending_lat, exit_pending_lng`
+
+**`geofence_events`** — `id, user_id, geofence_id, event_type ('enter'|'exit'), occurred_at`
+
+**DB access (SSH):**
+```bash
+ssh dckakadia@116.74.77.22
+# Password is in server/.env as DATABASE_URL
+PGPASSWORD=<db_password> psql -h localhost -U gps_tracker_user -d gps_tracker
+```
+
+---
+
+## Known Issues / Gotchas
+
+- **OSRM free tier `TooBig` errors**: OSRM rejects chunks with too many trace points. `roadSnapper.js` chunks at 100 pts and falls back to raw coords — errors in PM2 logs are expected and non-fatal.
+- **`locations_archive` schema drift**: Any column added to `locations` must also be added to `locations_archive` via `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`, or the 2 AM archive job will fail.
+- **GPS 422 errors**: Never return HTTP 422 from the location upload endpoint. Accuracy-poor points should be saved with `is_filtered=true`. Only true GPS teleports (speed > 150 km/h) should be silently discarded.
+- **Flutter web deploy needs hard-refresh**: After deploying a new build, users must press `Ctrl+Shift+R` to clear the Flutter service worker cache.
+- **Admin dashboard `pubspec.yaml` SDK**: Must stay at `>=3.0.0` — Dart records syntax is used in `HistoryScreen` speed legend.
