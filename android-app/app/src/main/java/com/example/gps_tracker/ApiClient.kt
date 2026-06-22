@@ -192,10 +192,11 @@ object ApiClient {
                         "recorded_at" to point.recordedAt,
                         "is_spoofed"  to point.isSpoofed,
                     )
-                    if (point.batteryLevel >= 0) pointMap["battery_level"] = point.batteryLevel
-                    if (point.accuracy >= 0f)    pointMap["accuracy"]      = point.accuracy
-                    if (point.speed >= 0f)       pointMap["speed"]         = point.speed
-                    if (point.bearing >= 0f)     pointMap["heading"]       = point.bearing
+                    if (point.batteryLevel >= 0)  pointMap["battery_level"]  = point.batteryLevel
+                    if (point.accuracy >= 0f)     pointMap["accuracy"]       = point.accuracy
+                    if (point.speed >= 0f)        pointMap["speed"]          = point.speed
+                    if (point.bearing >= 0f)      pointMap["heading"]        = point.bearing
+                    if (point.isDerivedSpeed)     pointMap["derived_speed"]  = true
                     pointMap
                 }
 

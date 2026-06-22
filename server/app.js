@@ -33,6 +33,7 @@ import { migrateGeofenceEvents } from './db/migrate-geofence-events.js';
 import { initializeFcm } from './db/init-fcm.js';
 import { initializeRefreshTokenVersion } from './db/init-refresh-token-version.js';
 import { initializeBackupRuns } from './db/init-backup-runs.js';
+import { initializeDerivedSpeed } from './db/init-derived-speed.js';
 
 dotenv.config();
 
@@ -187,6 +188,7 @@ const startServer = async () => {
     initializeGpsQuality().catch(err => console.error('Failed to initialize GPS quality columns:', err.message)),
     initializeRefreshTokenVersion().catch(err => console.error('Failed to initialize refresh token version:', err.message)),
     initializeBackupRuns().catch(err => console.error('Failed to initialize backup runs table:', err.message)),
+    initializeDerivedSpeed().catch(err => console.error('Failed to initialize derived speed columns:', err.message)),
   ]);
 
   // PostGIS depends on schema existing; geofence events migration depends on geofences table

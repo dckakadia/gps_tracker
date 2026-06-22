@@ -113,6 +113,21 @@ router.post('/', uploadLimiter, authorize, async (req, res) => {
       resetFilterForUser(userId);
     }
 
+    // ── Seed prevPoint for server-side derived speed ──────────────────────────
+    // Fetch the last stored (non-spoofed) location for this user so we can derive
+    // speed for the very first point in a batch even if there's no in-batch predecessor.
+    let prevPointForSpeed = null;
+    try {
+      const prevRes = await query(
+        `SELECT latitude, longitude, recorded_at
+         FROM locations
+         WHERE user_id = $1 AND is_spoofed = FALSE
+         ORDER BY recorded_at DESC LIMIT 1`,
+        [userId],
+      );
+      if (prevRes.rows[0]) prevPointForSpeed = prevRes.rows[0];
+    } catch { /* non-fatal — proceed without a seed */ }
+
     const values       = [];
     const placeholders = [];
     let validCount     = 0;
@@ -168,17 +183,57 @@ router.post('/', uploadLimiter, authorize, async (req, res) => {
         }
       }
 
+      // ── Server-side derived speed ────────────────────────────────────────────
+      // If GPS speed is zero/null (common under poor signal), derive speed from the
+      // distance to the previous point divided by the elapsed time.
+      // Only derive when time delta is 5–120 s and result ≤ 80 m/s (288 km/h).
+      // Derived speed is never used when GPS accuracy is ≤ 50 m — GPS is trusted there.
+      const derivedSpeedFlag = point.derived_speed === true;
+      const gpsSpeed = typeof speedMs === 'number' ? speedMs : null;
+      let computedSpeed = null;
+      let speedSource   = 'none';
+
+      if (gpsSpeed !== null && gpsSpeed > 0 && accuracyM !== null && accuracyM <= 50) {
+        // Reliable GPS speed.
+        speedSource = 'gps';
+      } else if (derivedSpeedFlag && gpsSpeed !== null && gpsSpeed > 0) {
+        // Client already derived and sent the speed — trust it.
+        speedSource   = 'derived';
+        computedSpeed = gpsSpeed;
+      } else if (prevPointForSpeed) {
+        // Compute from previous stored/batch point using Haversine (≡ PostGIS ST_Distance on geography).
+        const currMs = new Date(recordedAtIso).getTime();
+        const prevMs = new Date(prevPointForSpeed.recorded_at).getTime();
+        const deltaSec = (currMs - prevMs) / 1000;
+        if (deltaSec >= 5 && deltaSec <= 120) {
+          const distM = haversine(
+            parseFloat(prevPointForSpeed.latitude), parseFloat(prevPointForSpeed.longitude),
+            latitude, longitude,
+          ) * 1000;
+          const derived = distM / deltaSec;
+          if (derived <= 80) {
+            computedSpeed = Math.round(derived * 100) / 100;
+            speedSource   = 'derived';
+          }
+        }
+      }
+
+      // Advance the sliding window (use raw incoming coords for next-point derivation).
+      prevPointForSpeed = { latitude, longitude, recorded_at: recordedAtIso };
+
       validTs.push(recordedAtIso);
-      const idx = validCount * 11;
+      const idx = validCount * 13;
       placeholders.push(
-        `($${idx+1},$${idx+2},$${idx+3},$${idx+4},NOW(),$${idx+5},$${idx+6},$${idx+7},$${idx+8},$${idx+9},$${idx+10},$${idx+11})`
+        `($${idx+1},$${idx+2},$${idx+3},$${idx+4},NOW(),$${idx+5},$${idx+6},$${idx+7},$${idx+8},$${idx+9},$${idx+10},$${idx+11},$${idx+12},$${idx+13})`
       );
       values.push(
         userId, finalLat, finalLng, recordedAtIso,
         batteryV, spoofed,
         accuracyM, speedMs, headingD,
         isFiltered,
-        latitude !== finalLat || longitude !== finalLng ? latitude : null, // original_lat if filtered
+        latitude !== finalLat || longitude !== finalLng ? latitude : null, // original_lat (discarded)
+        computedSpeed,
+        speedSource,
       );
       validCount++;
     }
@@ -189,37 +244,37 @@ router.post('/', uploadLimiter, authorize, async (req, res) => {
       return res.status(201).json({ message: 'No valid points in batch', accepted: 0, rejected: pointsCount });
     }
 
-    // Note: last two placeholders are is_filtered and a scratch column — we omit original coords
-    // for brevity (the filtered coords are what we store as canonical position).
-    // Re-shape: remove the "original_lat" placeholder item and use 10-column insert.
+    // Re-shape: drop original_lat (slot 10) and keep the 12 real columns.
     const cleanValues       = [];
     const cleanPlaceholders = [];
     let ci = 0;
     for (let i = 0; i < validCount; i++) {
-      const base = i * 11;
+      const base = i * 13;
       cleanPlaceholders.push(
-        `($${ci+1},$${ci+2},$${ci+3},$${ci+4},NOW(),$${ci+5},$${ci+6},$${ci+7},$${ci+8},$${ci+9},$${ci+10})`
+        `($${ci+1},$${ci+2},$${ci+3},$${ci+4},NOW(),$${ci+5},$${ci+6},$${ci+7},$${ci+8},$${ci+9},$${ci+10},$${ci+11},$${ci+12})`
       );
-      // userId, lat, lng, recorded_at, battery, spoofed, accuracy, speed, heading, is_filtered
+      // userId, lat, lng, recorded_at, battery, spoofed, accuracy, speed, heading, is_filtered, computed_speed, speed_source
       cleanValues.push(
-        values[base],   // user_id
-        values[base+1], // lat (filtered)
-        values[base+2], // lng (filtered)
-        values[base+3], // recorded_at
-        values[base+4], // battery_level
-        values[base+5], // is_spoofed
-        values[base+6], // accuracy
-        values[base+7], // speed
-        values[base+8], // heading
-        values[base+9], // is_filtered
+        values[base],    // user_id
+        values[base+1],  // lat (filtered)
+        values[base+2],  // lng (filtered)
+        values[base+3],  // recorded_at
+        values[base+4],  // battery_level
+        values[base+5],  // is_spoofed
+        values[base+6],  // accuracy
+        values[base+7],  // speed  (raw GPS; 0 when GPS chip unreliable)
+        values[base+8],  // heading
+        values[base+9],  // is_filtered
+        values[base+11], // computed_speed (skip base+10 = original_lat)
+        values[base+12], // speed_source
       );
-      ci += 10;
+      ci += 12;
     }
 
     await query(
       `INSERT INTO locations
          (user_id, latitude, longitude, recorded_at, received_at, battery_level, is_spoofed,
-          accuracy, speed, heading, is_filtered)
+          accuracy, speed, heading, is_filtered, computed_speed, speed_source)
        VALUES ${cleanPlaceholders.join(', ')}`,
       cleanValues,
     );
@@ -405,7 +460,7 @@ router.post('/', uploadLimiter, authorize, async (req, res) => {
         const latest = await query(
           `SELECT u.id AS user_id, u.name, u.email, l.latitude, l.longitude,
                   l.recorded_at, l.received_at, l.is_spoofed, l.battery_level,
-                  l.accuracy, l.speed, l.heading,
+                  l.accuracy, l.speed, l.computed_speed, l.speed_source, l.heading,
                   (l.recorded_at >= NOW() - INTERVAL '10 minutes') AS is_live
            FROM users u
            JOIN locations l ON l.user_id = u.id
@@ -442,7 +497,7 @@ router.get('/latest', authorize, requireAdmin, async (req, res) => {
                 u.id AS user_id, u.name, u.email,
                 l.latitude, l.longitude, l.recorded_at, l.received_at, l.is_spoofed,
                 (l.recorded_at >= NOW() - INTERVAL '10 minutes') AS is_live,
-                l.battery_level, l.accuracy, l.speed, l.heading
+                l.battery_level, l.accuracy, l.speed, l.computed_speed, l.speed_source, l.heading
          FROM users u
          INNER JOIN locations l ON l.user_id = u.id
          WHERE u.role != $1 AND l.is_spoofed = FALSE
@@ -473,7 +528,7 @@ router.get('/history/:userId', authorize, requireAdmin, async (req, res) => {
   try {
     const result = await query(
       `SELECT id, user_id, latitude, longitude, recorded_at, received_at,
-              accuracy, speed, heading, is_filtered
+              accuracy, speed, computed_speed, speed_source, heading, is_filtered
        FROM locations
        WHERE user_id=$1 AND recorded_at>=$2 AND recorded_at<$3 AND is_spoofed=FALSE
        ORDER BY recorded_at ASC`,

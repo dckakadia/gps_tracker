@@ -16,4 +16,7 @@ data class LocationEntity(
     val accuracy: Float = -1f,   // metres; -1 = not available
     val speed: Float = -1f,      // m/s;    -1 = not available
     val bearing: Float = -1f,    // degrees; -1 = not available
+    // Derived speed flag (added v1.4.0 / DB v4): true when speed was computed from
+    // consecutive coordinates because GPS chip reported 0 under poor signal (accuracy > 100 m).
+    val isDerivedSpeed: Boolean = false,
 )

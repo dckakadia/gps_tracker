@@ -46,6 +46,10 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlin.math.abs
+import kotlin.math.atan2
+import kotlin.math.cos
+import kotlin.math.sin
+import kotlin.math.sqrt
 
 class TrackingService : Service() {
 
@@ -92,6 +96,12 @@ class TrackingService : Service() {
     private var lastMovementTime  = System.currentTimeMillis()
     private var lastHeading: Float? = null
     private var lastSpeed: Float    = 0f
+
+    // Previous fix used for derived speed when GPS chip reports 0 m/s under poor signal.
+    private var prevLocLat: Double  = 0.0
+    private var prevLocLng: Double  = 0.0
+    private var prevLocTimeMs: Long = 0L
+    private var hasPrevLoc: Boolean = false
 
     @Volatile private var forceNextUpload = false
     @Volatile private var isLowBattery = false
@@ -283,6 +293,39 @@ class TrackingService : Service() {
             return
         }
 
+        // ── Derived speed (poor-signal fallback) ──────────────────────────────
+        // When GPS reports 0 m/s AND accuracy is worse than 100 m (e.g. inside a moving train)
+        // derive speed from consecutive coordinate displacement instead.
+        val currentTimeMs = trustedTimestampMs(location)
+        var derivedSpeed    = -1f
+        var isDerivedSpeed  = false
+        if (location.hasSpeed() && location.speed == 0.0f
+            && location.hasAccuracy() && location.accuracy > 100f
+            && hasPrevLoc) {
+            val deltaSec = (currentTimeMs - prevLocTimeMs) / 1000.0
+            if (deltaSec in 5.0..120.0) {
+                val distM = haversineMeters(prevLocLat, prevLocLng, location.latitude, location.longitude)
+                val computed = (distM / deltaSec).toFloat()
+                if (computed <= 80f) {  // cap at 80 m/s (288 km/h)
+                    derivedSpeed   = computed
+                    isDerivedSpeed = true
+                    android.util.Log.i("TrackingService",
+                        "Derived speed: ${"%.1f".format(derivedSpeed)} m/s (${"%.1f".format(derivedSpeed * 3.6)} km/h) " +
+                        "over ${"%.0f".format(deltaSec)}s, acc=${location.accuracy.toInt()}m")
+                    LiveLogManager.log("📐",
+                        "Derived speed: ${"%.1f".format(derivedSpeed * 3.6)} km/h (GPS=0, acc=${location.accuracy.toInt()}m)")
+                }
+            }
+        }
+        // Advance the sliding window for real (non-mock) fixes.
+        prevLocLat    = location.latitude
+        prevLocLng    = location.longitude
+        prevLocTimeMs = currentTimeMs
+        hasPrevLoc    = true
+
+        // Use effective speed for maneuver detection and stationary logic.
+        val effectiveSpeed = if (isDerivedSpeed) derivedSpeed else speed
+
         // Maneuver detection — force immediate upload on sharp turn or speed burst.
         var isManeuver = false
         if (heading != null && lastHeading != null) {
@@ -294,34 +337,48 @@ class TrackingService : Service() {
                 isManeuver = true
             }
         }
-        if (abs(speed - lastSpeed) > SPEED_DELTA_THRESHOLD_MS) {
+        if (abs(effectiveSpeed - lastSpeed) > SPEED_DELTA_THRESHOLD_MS) {
             android.util.Log.i("TrackingService",
-                "Speed change: ${"%.1f".format(abs(speed - lastSpeed))} m/s — forcing upload")
-            LiveLogManager.log("⚡", "Speed change: ${"%.1f".format(abs(speed - lastSpeed))} m/s")
+                "Speed change: ${"%.1f".format(abs(effectiveSpeed - lastSpeed))} m/s — forcing upload")
+            LiveLogManager.log("⚡", "Speed change: ${"%.1f".format(abs(effectiveSpeed - lastSpeed))} m/s")
             isManeuver = true
         }
         if (isManeuver) synchronized(pendingPoints) { forceNextUpload = true }
 
         lastHeading = heading
-        lastSpeed   = speed
+        lastSpeed   = effectiveSpeed
 
-        if (speed > STATIONARY_SPEED_MS) {
+        if (effectiveSpeed > STATIONARY_SPEED_MS) {
             lastMovementTime = System.currentTimeMillis()
         } else if (System.currentTimeMillis() - lastMovementTime > STATIONARY_TIMEOUT_MS) {
             android.util.Log.i("TrackingService",
                 "No movement for 3 min — entering stationary deep sleep")
-            processLocation(location, isSpoofed = false)
+            processLocation(location, isSpoofed = false,
+                derivedSpeed = derivedSpeed, isDerivedSpeed = isDerivedSpeed)
             enterStationaryState()
             return
         }
 
-        processLocation(location, isSpoofed = false)
+        processLocation(location, isSpoofed = false,
+            derivedSpeed = derivedSpeed, isDerivedSpeed = isDerivedSpeed)
     }
 
     internal fun headingDiff(a: Float, b: Float): Float {
         var diff = abs(a - b) % 360f
         if (diff > 180f) diff = 360f - diff
         return diff
+    }
+
+    /** Haversine distance in metres between two WGS-84 coordinates. */
+    private fun haversineMeters(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
+        val R     = 6_371_000.0
+        val phi1  = Math.toRadians(lat1)
+        val phi2  = Math.toRadians(lat2)
+        val dPhi  = Math.toRadians(lat2 - lat1)
+        val dLam  = Math.toRadians(lon2 - lon1)
+        val a     = sin(dPhi / 2) * sin(dPhi / 2) +
+                    cos(phi1) * cos(phi2) * sin(dLam / 2) * sin(dLam / 2)
+        return R * 2 * atan2(sqrt(a), sqrt(1 - a))
     }
 
     // ── GPS timestamp — anti-spoofing ─────────────────────────────────────────
@@ -409,19 +466,26 @@ class TrackingService : Service() {
 
     // ── Upload logic ──────────────────────────────────────────────────────────
 
-    private fun processLocation(location: Location, isSpoofed: Boolean) {
+    private fun processLocation(
+        location: Location,
+        isSpoofed: Boolean,
+        derivedSpeed: Float = -1f,
+        isDerivedSpeed: Boolean = false,
+    ) {
         serviceScope.launch {
             try {
                 val batteryLevel = getBatteryLevel()
                 val point = LocationEntity(
-                    latitude     = location.latitude,
-                    longitude    = location.longitude,
-                    recordedAt   = trustedTimestampMs(location),
-                    batteryLevel = batteryLevel,
-                    isSpoofed    = isSpoofed,
-                    accuracy     = if (location.hasAccuracy())  location.accuracy  else -1f,
-                    speed        = if (location.hasSpeed())     location.speed     else -1f,
-                    bearing      = if (location.hasBearing())   location.bearing   else -1f,
+                    latitude       = location.latitude,
+                    longitude      = location.longitude,
+                    recordedAt     = trustedTimestampMs(location),
+                    batteryLevel   = batteryLevel,
+                    isSpoofed      = isSpoofed,
+                    accuracy       = if (location.hasAccuracy()) location.accuracy  else -1f,
+                    speed          = if (isDerivedSpeed)         derivedSpeed
+                                     else if (location.hasSpeed()) location.speed   else -1f,
+                    bearing        = if (location.hasBearing())  location.bearing   else -1f,
+                    isDerivedSpeed = isDerivedSpeed,
                 )
                 LiveLogManager.log("🔋", "Battery: $batteryLevel%")
 

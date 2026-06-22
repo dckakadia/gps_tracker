@@ -258,18 +258,24 @@ class _HistoryScreenState extends State<HistoryScreen> {
     }
     final lines = <Polyline>[];
     for (int i = 0; i < _points.length - 1; i++) {
+      final pt = _points[i + 1];
+      final derived = pt.isSpeedDerived;
       lines.add(Polyline(
         points: [
           LatLng(_points[i].latitude, _points[i].longitude),
-          LatLng(_points[i + 1].latitude, _points[i + 1].longitude),
+          LatLng(pt.latitude, pt.longitude),
         ],
-        color: _speedColor(_points[i + 1].speed),
-        strokeWidth: 5,
+        // Derived-speed segments are rendered at reduced opacity so the admin
+        // can visually distinguish estimated speed from GPS-measured speed.
+        color: _speedColor(pt.effectiveSpeed).withOpacity(derived ? 0.5 : 0.9),
+        strokeWidth: derived ? 3.5 : 5,
         strokeCap: StrokeCap.round,
       ));
     }
     return lines;
   }
+
+  bool get _hasDerivedSpeedPoints => _points.any((p) => p.isSpeedDerived);
 
   // ── CSV export ────────────────────────────────────────────────────────────────
 
@@ -653,6 +659,18 @@ class _HistoryScreenState extends State<HistoryScreen> {
               Text(e.$1, style: const TextStyle(fontSize: 10, color: AppTheme.textDark)),
             ]),
           )),
+          if (_hasDerivedSpeedPoints) ...[
+            const SizedBox(height: 6),
+            Row(mainAxisSize: MainAxisSize.min, children: [
+              Container(width: 16, height: 3,
+                decoration: BoxDecoration(
+                  color: AppTheme.textLight.withOpacity(0.5),
+                  borderRadius: BorderRadius.circular(2),
+                )),
+              const SizedBox(width: 6),
+              const Text('~ estimated', style: TextStyle(fontSize: 10, color: AppTheme.textLight)),
+            ]),
+          ],
         ],
       ),
     );
