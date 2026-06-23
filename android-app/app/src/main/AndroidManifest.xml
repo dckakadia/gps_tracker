@@ -111,6 +111,12 @@
             </intent-filter>
         </receiver>
 
+        <!-- GPS callback watchdog: restarts FLP when no location received for 2 min while MOVING -->
+        <receiver
+            android:name="com.example.gps_tracker.GpsWatchdogReceiver"
+            android:enabled="true"
+            android:exported="false" />
+
         <activity android:name="com.example.gps_tracker.LoginActivity"
             android:exported="true">
             <intent-filter>

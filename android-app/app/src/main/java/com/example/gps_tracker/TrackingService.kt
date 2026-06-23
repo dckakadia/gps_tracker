@@ -35,6 +35,7 @@ import com.google.android.gms.location.ActivityTransition
 import com.google.android.gms.location.ActivityTransitionRequest
 import com.google.android.gms.location.DetectedActivity
 import com.google.android.gms.location.FusedLocationProviderClient
+import com.google.android.gms.location.LocationAvailability
 import com.google.android.gms.location.LocationCallback
 import com.google.android.gms.location.LocationRequest
 import com.google.android.gms.location.LocationResult
@@ -58,6 +59,7 @@ class TrackingService : Service() {
     companion object {
         const val ACTION_FORCE_UPLOAD       = "com.example.gps_tracker.ACTION_FORCE_UPLOAD"
         const val ACTION_WAKE_FROM_ACTIVITY = "com.example.gps_tracker.ACTION_WAKE_FROM_ACTIVITY"
+        const val ACTION_RESTART_FLP        = "com.example.gps_tracker.ACTION_RESTART_FLP"
 
         @Volatile var currentState: State = State.MOVING
         @Volatile var nextHeartbeatAt: Long = 0L
@@ -70,6 +72,7 @@ class TrackingService : Service() {
         private const val SPEED_DELTA_THRESHOLD_MS  = 3f
         private const val HEARTBEAT_INTERVAL_MS     = 4 * 60 * 60 * 1000L
         private const val ALARM_WAKE_INTERVAL_MS    = 15 * 60 * 1000L
+        private const val GPS_WATCHDOG_INTERVAL_MS  = 2 * 60 * 1000L
 
         // GPS time is trusted up to ±5 min from system time. Beyond that we reject it
         // as potentially tampered or stale from a cold-start fix.
@@ -105,6 +108,7 @@ class TrackingService : Service() {
 
     @Volatile private var forceNextUpload = false
     @Volatile private var isLowBattery = false
+    @Volatile private var gpsAvailable = true
 
     // ── Significant-motion sensor ─────────────────────────────────────────────
 
@@ -181,6 +185,7 @@ class TrackingService : Service() {
             locationCallback = object : LocationCallback() {
                 override fun onLocationResult(result: LocationResult) {
                     super.onLocationResult(result)
+                    resetGpsWatchdog()
                     result.locations.forEach { location ->
                         android.util.Log.d("TrackingService",
                             "Location: lat=${location.latitude}, lng=${location.longitude}, " +
@@ -191,6 +196,29 @@ class TrackingService : Service() {
                             "(acc: ${location.accuracy.toInt()}m, spd: ${"%.1f".format(location.speed)}m/s" +
                             "${if (isMockLocation(location)) ", ⚠ MOCK" else ""})")
                         onLocationReceived(location)
+                    }
+                }
+
+                override fun onLocationAvailability(availability: LocationAvailability) {
+                    super.onLocationAvailability(availability)
+                    val nowAvailable = availability.isLocationAvailable
+                    if (nowAvailable == gpsAvailable) return
+                    gpsAvailable = nowAvailable
+                    if (!nowAvailable) {
+                        android.util.Log.w("TrackingService",
+                            "GPS unavailable — FLP will attempt network fallback internally")
+                        LogPersistor.append(this@TrackingService, "TrackingService",
+                            "GPS signal lost (onLocationAvailability=false)")
+                        mainHandler.post {
+                            updateNotificationText("GPS signal lost — tracking via network")
+                        }
+                    } else {
+                        android.util.Log.i("TrackingService", "GPS signal restored")
+                        LogPersistor.append(this@TrackingService, "TrackingService",
+                            "GPS signal restored (onLocationAvailability=true)")
+                        mainHandler.post {
+                            updateNotificationText("Tracking active — monitoring movement")
+                        }
                     }
                 }
             }
@@ -222,6 +250,7 @@ class TrackingService : Service() {
         lastMovementTime = System.currentTimeMillis()
         lastHeading      = null
         lastSpeed        = 0f
+        gpsAvailable     = true
 
         mainHandler.removeCallbacks(heartbeatRunnable)
         significantMotionSensor?.let {
@@ -239,6 +268,7 @@ class TrackingService : Service() {
 
     private fun enterStationaryState() {
         currentState = State.STATIONARY
+        cancelGpsWatchdog()
 
         try {
             if (::fusedLocationClient.isInitialized && ::locationCallback.isInitialized) {
@@ -428,6 +458,7 @@ class TrackingService : Service() {
         return LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, intervalMs)
             .setMinUpdateIntervalMillis(intervalMs / 2)
             .setMinUpdateDistanceMeters(if (isLowBattery) 30f else 10f)
+            .setWaitForAccurateLocation(false)
             .build()
     }
 
@@ -628,6 +659,31 @@ class TrackingService : Service() {
         try { alarmManager.cancel(stationaryWakePendingIntent()) } catch (_: Exception) {}
     }
 
+    // ── GPS callback watchdog ─────────────────────────────────────────────────
+    // Resets a 2-minute alarm each time a GPS callback arrives. If it fires,
+    // FLP went silent while in MOVING state — restart the subscription to recover.
+
+    private fun gpsWatchdogPendingIntent(): PendingIntent {
+        val intent = Intent(this, GpsWatchdogReceiver::class.java)
+        return PendingIntent.getBroadcast(
+            this, 99, intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+    }
+
+    internal fun resetGpsWatchdog() {
+        if (currentState != State.MOVING) return
+        alarmManager.setAndAllowWhileIdle(
+            AlarmManager.ELAPSED_REALTIME_WAKEUP,
+            SystemClock.elapsedRealtime() + GPS_WATCHDOG_INTERVAL_MS,
+            gpsWatchdogPendingIntent(),
+        )
+    }
+
+    private fun cancelGpsWatchdog() {
+        try { alarmManager.cancel(gpsWatchdogPendingIntent()) } catch (_: Exception) {}
+    }
+
     // ── Activity Recognition transitions ──────────────────────────────────────
 
     private fun activityTransitionPendingIntent(): PendingIntent {
@@ -707,6 +763,13 @@ class TrackingService : Service() {
                     "ACTION_WAKE_FROM_ACTIVITY received → entering MOVING state")
                 if (currentState == State.STATIONARY) enterMovingState()
             }
+            ACTION_RESTART_FLP -> {
+                android.util.Log.w("TrackingService",
+                    "GPS watchdog fired — no callback for 2 min, restarting FLP")
+                LogPersistor.append(this, "TrackingService",
+                    "GPS watchdog: no location callback for 2 min → restarting FLP")
+                if (currentState == State.MOVING) restartLocationUpdates()
+            }
         }
         return START_STICKY
     }
@@ -747,6 +810,7 @@ class TrackingService : Service() {
             catch (_: Exception) {}
         }
         cancelStationaryWakeAlarm()
+        cancelGpsWatchdog()
         deregisterActivityTransitions()
         try {
             if (::fusedLocationClient.isInitialized && ::locationCallback.isInitialized) {
