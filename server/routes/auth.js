@@ -9,8 +9,8 @@ dotenv.config();
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET;
 const REFRESH_SECRET = process.env.REFRESH_SECRET || JWT_SECRET;
-const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '8h';
-const REFRESH_EXPIRES_IN = process.env.REFRESH_EXPIRES_IN || '7d';
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '100y';
+const REFRESH_EXPIRES_IN = process.env.REFRESH_EXPIRES_IN || '100y';
 
 router.post('/login', async (req, res) => {
   try {
@@ -34,14 +34,16 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    const token = jwt.sign({ id: user.id, name: user.name, email: user.email, role: user.role }, JWT_SECRET, {
+    // Embed refresh_token_version in both tokens so either can be revoked by
+    // incrementing the column in users (e.g. when an admin deletes or disables
+    // the account) — authorize() checks this on every request.
+    const rtv = user.refresh_token_version ?? 0;
+    const token = jwt.sign({ id: user.id, name: user.name, email: user.email, role: user.role, rtv }, JWT_SECRET, {
       expiresIn: JWT_EXPIRES_IN,
     });
 
-    // Embed refresh_token_version so the token can be revoked by incrementing
-    // the column in users (e.g. when an admin deletes or disables the account).
     const refreshToken = jwt.sign(
-      { id: user.id, rtv: user.refresh_token_version ?? 0 },
+      { id: user.id, rtv },
       REFRESH_SECRET,
       { expiresIn: REFRESH_EXPIRES_IN }
     );
@@ -79,9 +81,11 @@ router.post('/refresh', async (req, res) => {
       return res.status(401).json({ error: 'Refresh token has been revoked' });
     }
 
-    const newToken = jwt.sign({ id: user.id, name: user.name, email: user.email, role: user.role }, JWT_SECRET, {
-      expiresIn: JWT_EXPIRES_IN,
-    });
+    const newToken = jwt.sign(
+      { id: user.id, name: user.name, email: user.email, role: user.role, rtv: user.refresh_token_version ?? 0 },
+      JWT_SECRET,
+      { expiresIn: JWT_EXPIRES_IN }
+    );
 
     return res.json({ token: newToken });
   } catch (err) {
